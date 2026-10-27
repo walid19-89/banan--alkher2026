@@ -16,9 +16,12 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY =
   Deno.env.get('SUPABASE_ANON_KEY') ??
   JSON.parse(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS') ?? '{}').default;
+// Prefer the new secret key (sb_secret_...). The runtime always injects the
+// legacy service_role JWT into SUPABASE_SERVICE_ROLE_KEY, and it may become an
+// empty string once the legacy key is revoked, so it is only a fallback.
+const SECRET_KEYS = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}') as Record<string, string>;
 const SERVICE_KEY =
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
-  JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}').default;
+  SECRET_KEYS.default || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const DB_URL = Deno.env.get('SUPABASE_DB_URL')!;
 const BUCKET = Deno.env.get('SUPABASE_STORAGE_BUCKET') ?? 'fund-files';
 const BACKUP_BUCKET = Deno.env.get('SUPABASE_BACKUP_BUCKET') ?? 'fund-backups';
