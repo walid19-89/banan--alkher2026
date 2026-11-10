@@ -12,7 +12,6 @@ type Check = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 
 async function runCheck(name: string, task: () => Promise<Response>): Promise<Check> {
   const started = performance.now();
@@ -54,7 +53,7 @@ export function DiagnosticsPage() {
     }
     results.push(await runCheck('الإنترنت العام (Google)', () =>
       fetch('https://www.google.com/generate_204', { mode: 'no-cors', cache: 'no-store', signal: timeout })));
-    results.push(await runCheck('Supabase / API', () =>
+    results.push(await runCheck('الخادم / API', () =>
       fetch(`${API_BASE}/health?db=1`, { cache: 'no-store', signal: timeout })));
     setChecks(results);
     setRunning(false);
@@ -64,7 +63,6 @@ export function DiagnosticsPage() {
     const lines = [
       `الرابط: ${window.location.href}`,
       `API: ${API_BASE}`,
-      `Supabase: ${SUPABASE_URL}`,
       ...checks.map((check) => `${check.name}: ${check.ok ? 'ناجح' : 'فاشل'} — ${check.detail}${check.ms ? ` (${check.ms}ms)` : ''}`),
     ];
     try {
@@ -75,7 +73,7 @@ export function DiagnosticsPage() {
     }
   }
 
-  const apiCheck = checks.find((check) => check.name === 'Supabase / API');
+  const apiCheck = checks.find((check) => check.name === 'الخادم / API');
   const internetCheck = checks.find((check) => check.name === 'الإنترنت العام (Google)');
 
   return (
@@ -86,7 +84,7 @@ export function DiagnosticsPage() {
           <div>
             <h1 style={{ margin: 0, fontSize: 22 }}>فحص الاتصال</h1>
             <p style={{ margin: '4px 0 0', color: 'var(--slate-500)' }}>
-              يساعدك على معرفة هل المشكلة في استضافة الصفحة أم في Supabase أم في الشبكة.
+              يساعدك على معرفة هل المشكلة في استضافة الصفحة أم في الخادم أم في الشبكة.
             </p>
           </div>
         </div>
@@ -94,7 +92,6 @@ export function DiagnosticsPage() {
         <div style={{ display: 'grid', gap: 8, margin: '18px 0', direction: 'ltr', textAlign: 'left', fontSize: 13 }}>
           <div><strong>Page:</strong> {window.location.origin}</div>
           <div><strong>API:</strong> {API_BASE || 'غير مضبوط'}</div>
-          <div><strong>Supabase:</strong> {SUPABASE_URL || 'غير مضبوط'}</div>
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -135,9 +132,9 @@ export function DiagnosticsPage() {
             <strong>النتيجة العملية</strong>
             <p style={{ margin: '8px 0 0', lineHeight: 1.8 }}>
               {apiCheck.ok
-                ? 'الاتصال بـ Supabase يعمل من هذه الشبكة. إذا كانت الصفحة لا تفتح أحياناً فالمشكلة قد تكون مؤقتة أو في استضافة الصفحة.'
+                ? 'الاتصال بالخادم يعمل من هذه الشبكة. إذا كانت الصفحة لا تفتح أحياناً فالمشكلة قد تكون مؤقتة أو في استضافة الصفحة.'
                 : internetCheck?.ok
-                  ? 'الإنترنت يعمل لكن Supabase / API لا يستجيب. غالباً النطاق supabase.co محجوب أو الشبكة تمنع الاتصال. الحل: نطاق مخصص لـ Supabase أو وسيط عكسي، وليس تغيير كود التطبيق.'
+                  ? 'الإنترنت يعمل لكن الخادم لا يستجيب. جرّب إعادة المحاولة بعد قليل، أو أبلغ الإدارة إن استمرت المشكلة.'
                   : 'تعذر الوصول إلى الإنترنت العام أيضاً. جرّب شبكة أخرى أو تحقق من VPN/المشغّل. لا يمكن للنظام تجاوز حجب الشبكة من داخل التطبيق.'}
             </p>
           </div>
