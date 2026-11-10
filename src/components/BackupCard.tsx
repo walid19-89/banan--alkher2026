@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { DatabaseBackup, Download, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
-import { api, apiErrorMessage } from '../lib/api';
+import { api, apiErrorMessage, resolveApiPath } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
 import { formatDateTime } from '../lib/format';
@@ -97,7 +97,7 @@ export function BackupCard() {
     try {
       const result = await api.post<{ backup: BackupRow; url: string }>('/backup');
       toast.success('تم إنشاء النسخة الاحتياطية بنجاح');
-      await saveOrOpenBackup(result.url, result.backup.filename);
+      await saveOrOpenBackup(resolveApiPath(result.url), result.backup.filename);
       await load();
     } catch (createError) {
       setError(apiErrorMessage(createError));
@@ -112,7 +112,7 @@ export function BackupCard() {
     setError('');
     try {
       const result = await api.get<{ url: string; backup: BackupRow }>(`/backups/${id}`);
-      await saveOrOpenBackup(result.url, result.backup.filename);
+      await saveOrOpenBackup(resolveApiPath(result.url), result.backup.filename);
     } catch (downloadError) {
       setError(apiErrorMessage(downloadError));
     } finally {

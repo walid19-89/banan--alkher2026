@@ -8,6 +8,14 @@
 [build.environment]
   NODE_VERSION = "22"
 
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# The API function runs on Node and talks to PostgreSQL directly. Its path is
+# declared in netlify/functions/api.ts so Netlify routes /api/* there before the
+# SPA rewrite below.
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

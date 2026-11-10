@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api, ApiError, setAccessToken } from './api';
-import { supabase } from './supabase';
+import { getStoredToken, setStoredToken } from './session';
 import type { Capabilities, PublicSettings, SessionPayload, User } from '../types';
 
 interface AuthContextValue {
@@ -74,53 +74,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mounted.current) applySession(payload);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        const { data } = await supabase.auth.refreshSession();
-        if (data.session) {
-          setAccessToken(data.session.access_token);
-          try {
-            const payload = await api.get<SessionPayload>('/auth/me', AbortSignal.timeout(15000));
-            if (mounted.current) applySession(payload);
-            return;
-          } catch {
-            /* fall through to clear */
-          }
-        }
+        setAccessToken(null);
+        setStoredToken(null);
       }
       if (mounted.current) clear();
     }
   }, [applySession, clear]);
 
   useEffect(() => {
-    let active = true;
-
+    const token = getStoredToken();
+    setAccessToken(token);
     (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!active) return;
-      setAccessToken(data.session?.access_token ?? null);
-      if (data.session) await refresh();
+      if (token) await refresh();
       else clear();
-      if (active) setLoading(false);
+      if (mounted.current) setLoading(false);
     })();
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active) return;
-      setAccessToken(session?.access_token ?? null);
-      if (event === 'SIGNED_OUT' || !session) {
-        clear();
-      }
-      // login()/signup() call refresh() explicitly. Refreshing here too caused
-      // two simultaneous /auth/me calls (and a long splash) on every reload.
-    });
-
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
-    };
   }, [refresh, clear]);
 
   useEffect(() => {
     const onUnauthorized = () => {
       setAccessToken(null);
+      setStoredToken(null);
       clear();
     };
     window.addEventListener('banan:unauthorized', onUnauthorized);
@@ -130,31 +104,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (identifier: string, password: string) => {
       const value = identifier.trim();
-      if (value.includes('@')) {
-        const { error } = await supabase.auth.signInWithPassword({ email: value, password });
-        if (error) throw new ApiError(friendlyAuthError(error.message), 401);
-      } else {
-        const digits = value.replace(/\D/g, '');
-        if (digits.length < 6) {
-          throw new ApiError('أدخل بريداً إلكترونياً صالحاً أو رقم هاتف مسجلاً', 400);
-        }
-        const result = await api.post<{
-          session: { access_token: string; refresh_token: string };
-        }>('/auth/login-phone', { phone: digits, password });
-        const { error } = await supabase.auth.setSession({
-          access_token: result.session.access_token,
-          refresh_token: result.session.refresh_token,
-        });
-        if (error) throw new ApiError(friendlyAuthError(error.message), 401);
+      const isEmail = value.includes('@');
+      const digits = value.replace(/\D/g, '');
+      if (!isEmail && digits.length < 6) {
+        throw new ApiError('أدخل بريداً إلكترونياً صالحاً أو رقم هاتف مسجلاً', 400);
       }
-      const { data: sessionData } = await supabase.auth.getSession();
-      setAccessToken(sessionData.session?.access_token ?? null);
+      let result: { session: { access_token: string } };
+      try {
+        result = await api.post<{ session: { access_token: string } }>('/auth/login', {
+          email: isEmail ? value : null,
+          phone: isEmail ? null : digits,
+          password,
+        });
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          throw new ApiError('البريد الإلكتروني أو كلمة المرور غير صحيحة', 401);
+        }
+        throw error;
+      }
+      const token = result.session?.access_token ?? null;
+      if (!token) throw new ApiError(friendlyAuthError(''), 401);
+      setAccessToken(token);
+      setStoredToken(token);
       try {
         const payload = await api.get<SessionPayload>('/auth/me', AbortSignal.timeout(15000));
         if (mounted.current) applySession(payload);
       } catch (error) {
-        await supabase.auth.signOut().catch(() => undefined);
         setAccessToken(null);
+        setStoredToken(null);
         if (mounted.current) clear();
         throw error;
       }
@@ -172,8 +149,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       // Signup creates a pending account. Never leave the new user signed in
       // before an administrator approves the request.
-      await supabase.auth.signOut().catch(() => undefined);
       setAccessToken(null);
+      setStoredToken(null);
       clear();
       return {
         message: result.message || 'تم إرسال طلب التسجيل بنجاح. سيبقى الحساب معطلاً حتى توافق الإدارة عليه.',
@@ -183,12 +160,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    try {
-      await supabase.auth.signOut();
-    } finally {
-      setAccessToken(null);
-      clear();
-    }
+    setAccessToken(null);
+    setStoredToken(null);
+    clear();
   }, [clear]);
 
   const value = useMemo(

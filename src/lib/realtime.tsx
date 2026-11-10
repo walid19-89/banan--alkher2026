@@ -10,7 +10,6 @@ import {
 } from 'react';
 import { api } from './api';
 import { useAuth } from './auth';
-import { supabase } from './supabase';
 import { useToast } from './toast';
 import type { FundNotification } from '../types';
 
@@ -27,6 +26,11 @@ interface RealtimeContextValue {
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null);
 
+// The portable API runs on ordinary HTTP functions and has no Realtime channel,
+// so the client polls a tiny /sync endpoint instead. Twenty seconds keeps the
+// app responsive without loading the free database plan.
+const POLL_INTERVAL_MS = 20_000;
+
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const toast = useToast();
@@ -36,7 +40,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(false);
   const bumpTimer = useRef<number | null>(null);
-  const channelSuffix = useRef(Math.random().toString(36).slice(2)).current;
+  const knownIds = useRef<Set<string>>(new Set());
+  const lastEventId = useRef(-1);
 
   const scheduleVersionBump = useCallback(() => {
     if (bumpTimer.current) window.clearTimeout(bumpTimer.current);
@@ -46,74 +51,74 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     }, 350);
   }, []);
 
-  const refreshNotifications = useCallback(async () => {
-    if (!userId) {
-      setNotifications([]);
-      setUnread(0);
-      return;
-    }
-    setLoading(true);
-    try {
-      const payload = await api.get<{ notifications: FundNotification[]; unread: number }>(
-        '/notifications'
-      );
-      setNotifications(payload.notifications);
-      setUnread(payload.unread);
-    } catch {
-      /* A notification failure must never block the main screen. */
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
+  const loadNotifications = useCallback(
+    async (announce: boolean) => {
+      if (!userId) {
+        setNotifications([]);
+        setUnread(0);
+        knownIds.current = new Set();
+        return;
+      }
+      setLoading(true);
+      try {
+        const payload = await api.get<{ notifications: FundNotification[]; unread: number }>(
+          '/notifications'
+        );
+        if (announce) {
+          const fresh = payload.notifications.filter((item) => !knownIds.current.has(item.id));
+          if (fresh.length && knownIds.current.size) toast.info(fresh[0].title);
+        }
+        knownIds.current = new Set(payload.notifications.map((item) => item.id));
+        setNotifications(payload.notifications);
+        setUnread(payload.unread);
+      } catch {
+        /* A notification failure must never block the main screen. */
+      } finally {
+        setLoading(false);
+      }
+    },
+    [userId, toast]
+  );
+
+  const refreshNotifications = useCallback(
+    () => loadNotifications(false),
+    [loadNotifications]
+  );
 
   useEffect(() => {
     if (!userId) {
       setNotifications([]);
       setUnread(0);
+      knownIds.current = new Set();
+      lastEventId.current = -1;
       return;
     }
 
-    void refreshNotifications();
+    void loadNotifications(false);
 
-    const channel = supabase
-      .channel(`fund-realtime-${userId}-${channelSuffix}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'fund_events' },
-        () => scheduleVersionBump()
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'fund_notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const notification = payload.new as FundNotification;
-          setNotifications((current) => [notification, ...current].slice(0, 50));
-          setUnread((current) => current + 1);
-          toast.info(notification.title);
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const sync = await api.get<{ latest_event_id: number; unread: number }>('/sync');
+        if (stopped) return;
+        if (lastEventId.current >= 0 && sync.latest_event_id !== lastEventId.current) {
           scheduleVersionBump();
+          if (sync.unread > unread) void loadNotifications(true);
         }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'fund_notifications',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => void refreshNotifications()
-      )
-      .subscribe();
+        lastEventId.current = sync.latest_event_id;
+      } catch {
+        /* Network blips are expected on mobile; the next tick retries. */
+      }
+    };
+
+    void tick();
+    const interval = window.setInterval(tick, POLL_INTERVAL_MS);
 
     return () => {
-      void supabase.removeChannel(channel);
+      stopped = true;
+      window.clearInterval(interval);
     };
-  }, [userId, channelSuffix, refreshNotifications, scheduleVersionBump, toast]);
+  }, [userId, loadNotifications, scheduleVersionBump, unread]);
 
   useEffect(() => {
     if (!userId) return;
@@ -123,11 +128,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener('focus', refreshOnFocus);
     document.addEventListener('visibilitychange', refreshOnVisible);
-    const interval = window.setInterval(refreshOnFocus, 60_000);
     return () => {
       window.removeEventListener('focus', refreshOnFocus);
       document.removeEventListener('visibilitychange', refreshOnVisible);
-      window.clearInterval(interval);
     };
   }, [userId, refreshNotifications]);
 

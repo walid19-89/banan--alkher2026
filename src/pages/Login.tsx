@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   User,
 } from 'lucide-react';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, resolveApiPath } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
 import { Button, Field, TextInput } from '../components/ui';
@@ -56,7 +56,7 @@ export function LoginPage() {
   }, [user, navigate, location.state]);
 
   const fundName = publicSettings?.fund_name ?? FUND_NAME;
-  const logoUrl = publicSettings?.logo_url ?? null;
+  const logoUrl = resolveApiPath(publicSettings?.logo_url);
   const allowSignups = publicSettings?.allow_signups !== false;
 
   function update(field: keyof typeof form, value: string) {

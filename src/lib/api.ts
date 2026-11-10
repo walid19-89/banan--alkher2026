@@ -1,5 +1,5 @@
-import { supabase } from './supabase';
 import { Capacitor } from '@capacitor/core';
+import { getStoredToken } from './session';
 
 export class ApiError extends Error {
   status: number;
@@ -24,17 +24,14 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '
 // platform runs it in the region closest to the visitor and every SQL query
 // pays a cross-region round trip.
 const EDGE_REGION = import.meta.env.VITE_EDGE_REGION || 'ap-northeast-2';
-let accessToken: string | null = null;
+let accessToken: string | null = getStoredToken();
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
-  if (!accessToken) {
-    const { data } = await supabase.auth.getSession();
-    accessToken = data.session?.access_token ?? null;
-  }
+  if (!accessToken) accessToken = getStoredToken();
   return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
 }
 
@@ -176,6 +173,19 @@ export function fileUrl(filename: string | null | undefined) {
   if (accessToken) params.set('token', accessToken);
   params.set('forceFunctionRegion', EDGE_REGION);
   return `${base}/files/${encodeURIComponent(filename)}?${params.toString()}`;
+}
+
+/**
+ * Resolves an API-relative path (for example `/api/logo?v=1` returned by the
+ * backend) against the configured API base. Needed on Android where the app is
+ * served from capacitor://localhost but the API lives on a remote host.
+ */
+export function resolveApiPath(path: string | null | undefined) {
+  if (!path) return '';
+  if (/^(https?:|blob:|data:)/i.test(path)) return path;
+  const suffix = path.startsWith('/api/') ? path.slice(4) : path;
+  const base = API_BASE.startsWith('http') ? API_BASE : `${window.location.origin}/api`;
+  return `${base.replace(/\/+$/, '')}${suffix.startsWith('/') ? suffix : `/${suffix}`}`;
 }
 
 export function apiErrorMessage(error: unknown) {
