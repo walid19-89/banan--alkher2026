@@ -18,12 +18,13 @@ Excel، المرفقات المتعددة، التوقيع الإلكتروني 
 |---|---|
 | نسخة الويب (تعمل بدون VPN) | https://banan-fund.netlify.app/ |
 | فحص الوصول المباشر | https://banan-fund.netlify.app/ping.txt |
+| فحص الخادم والقاعدة | https://banan-fund.netlify.app/api/health?db=1 |
 | GitHub Pages (محجوب على YemenNet — سجل تاريخي) | https://walid19-89.github.io/banan--alkher2026/ |
 | نسخة احتياطية (Cloudflare Worker — محجوبة) | https://banan-fund.pool-wave.workers.dev/ |
-| فحص Supabase | https://vhyckuwhuhdyvhxyqdgt.supabase.co/functions/v1/api/health |
 | تطبيق الأندرويد (APK) | https://github.com/walid19-89/banan--alkher2026/releases |
 | الكود | https://github.com/walid19-89/banan--alkher2026 |
-| Supabase | https://supabase.com/dashboard/project/vhyckuwhuhdyvhxyqdgt |
+| قاعدة البيانات (Neon) | https://console.neon.tech/ |
+| Supabase (احتياط تاريخي) | https://supabase.com/dashboard/project/vhyckuwhuhdyvhxyqdgt |
 
 > دليل الاستخدام خطوة بخطوة: [`docs/دليل-المستخدم.md`](docs/دليل-المستخدم.md)
 >
@@ -35,26 +36,25 @@ Excel، المرفقات المتعددة، التوقيع الإلكتروني 
 
 ```
 المتصفح / تطبيق الأندرويد (Capacitor)
-        │  Supabase Auth (JWT) + REST
+        │  JWT محلي (HS256) + REST
         ▼
-Supabase Edge Function  /functions/v1/api   (Hono + postgres.js)
-        │  Supavisor transaction pooler (5432 → 6543)
+Netlify Function  /api/*   (Hono + postgres.js، Node 22)
+        │  SSL مباشر إلى Neon
         ▼
-PostgreSQL (Supabase)  ──  RLS + triggers + realtime
+Neon PostgreSQL 17  ──  RLS + triggers
         │
-        ├── Supabase Storage: fund-files (مرفقات) + fund-backups (نسخ احتياطية)
-        └── Supabase Realtime: fund_events + fund_notifications
+        ├── جدول public.fund_storage: الشعار + المرفقات + النسخ الاحتياطية
+        └── استقصاء /sync كل 20 ثانية بدل Realtime
 ```
 
 - **الواجهة:** React 19 + Vite + TypeScript + HashRouter.
-- **الاستضافة:** Netlify (نسخة الويب العامة، تعمل بدون VPN) وGitHub Releases (APK).
+- **الاستضافة:** Netlify (الواجهة والدالة معًا، تعمل بدون VPN) وGitHub Releases (APK).
   GitHub Pages يبقى منشوراً كسجل تاريخي لكنه محجوب على YemenNet.
-- **البيانات:** Supabase PostgreSQL مع RLS.
-- **المصادقة:** Supabase Auth (بريد أو رقم هاتف وكلمة مرور).
-- **الملفات:** Supabase Storage.
-- **التحديث الفوري:** Supabase Realtime (جدول أحداث خفيف `fund_events` + إشعارات).
-- **الخادم:** Edge Function واحدة تحافظ على نفس واجهة REST القديمة.
-- **المنطقة:** Edge Function تعمل في `ap-northeast-2` (سيول) بجوار قاعدة البيانات.
+- **البيانات:** Neon PostgreSQL 17 (خطة مجانية، بلا إيقاف عند الخمول).
+- **المصادقة:** JWT محلي فوق بصمات bcrypt الموجودة في `auth.users` (بريد أو هاتف).
+- **الملفات:** داخل القاعدة في `fund_storage`.
+- **التحديث شبه الفوري:** استقصاء `GET /sync` كل 20 ثانية.
+- **الخادم:** دالة Netlify واحدة تحافظ على نفس واجهة REST القديمة.
 
 ---
 
@@ -158,26 +158,32 @@ PostgreSQL (Supabase)  ──  RLS + triggers + realtime
 ### المتطلبات
 
 - Node.js 22.5 أو أحدث (المشروع يستخدم Node 24 محلياً).
-- حساب Supabase ومفاتيحه (أو استخدم المشروع الحالي).
+- قاعدة Neon (أو أي PostgreSQL 17) وسلسلة اتصالها.
 
 ### الخطوات
 
 ```powershell
 npm install
-Copy-Item .env.example .env   # ثم عدّل القيم
-npm run dev                   # يشغّل Vite على http://localhost:5173
+Copy-Item api/.env.example api/.env   # ثم ضع DATABASE_URL وAUTH_SECRET وCRON_SECRET
+npm run api:dev                       # API على http://127.0.0.1:8787/api
+npm run dev                           # الواجهة على http://localhost:5173
 ```
 
-قيم Vite المطلوبة في `.env`:
+`vite.config.ts` يوجّه `/api` محلياً إلى `http://127.0.0.1:8787`.
+
+متغيرات الخادم في `api/.env`:
 
 ```dotenv
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon-key>
-VITE_API_BASE_URL=https://<project-ref>.supabase.co/functions/v1/api
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+AUTH_SECRET=<64-hex>
+CRON_SECRET=<32-hex>
+APP_ORIGINS=http://localhost:5173,https://banan-fund.netlify.app,https://localhost
+PG_POOL_MAX=2
+DB_SSL=require
 ```
 
-> مفتاح `service_role` **لا** يوضع في Vite ولا في الواجهة. يُستخدم فقط داخل Edge Function
-> أو سكربتات إدارية محلية.
+> لا تُرفع `api/.env` إلى Git، ولا تضع أسرار قاعدة البيانات داخل أي متغير `VITE_*`
+> لأنه يُحزَّم في الواجهة ويصبح مرئياً للجميع.
 
 ### أوامر مفيدة
 
@@ -211,19 +217,18 @@ npm run apk:sync      # build + npx cap sync android
 | `0011_secondary_currency.sql` | العملة الثانية وسعر الصرف اليدوي (`secondary_currency`, `exchange_rate`, `secondary_enabled`) |
 | `0012_member_credit_and_receipt_currency.sql` | الرصيد الدائن للعضو وتطبيقه التلقائي على أقدم المستحقات، وعملة إدخال السند |
 | `0013_secondary_cash_box.sql` | الخزينة الثانية المستقلة، جدول `fund_cash_transfers`، وتسلسل `cash_transfer` |
+| `0014_portable_auth_and_storage.sql` | جدول `fund_storage` للتخزين داخل القاعدة، وإعادة محفز ملف المستخدم، وقيمة افتراضية للمعرّف |
 
-تطبيق الترحيلات عبر Supabase CLI:
+تطبيق ملف SQL على قاعدة Neon:
 
 ```powershell
-npx supabase link --project-ref vhyckuwhuhdyvhxyqdgt
-npx supabase db push
+node scripts/apply-sql.mjs supabase/migrations/0014_portable_auth_and_storage.sql backups/neon-unclaimed-new.json
 ```
 
-أو عبر Management API (كما تم في هذا المشروع):
+استرجاع كامل (المخطط + البيانات + الترحيل + التحقق من الأعداد):
 
 ```powershell
-$env:SUPABASE_ACCESS_TOKEN = "<management-api-token>"
-# POST /v1/projects/{ref}/database/query  بالـ SQL المطلوب
+node scripts/restore-neon.mjs backups/neon-unclaimed-new.json
 ```
 
 ### الجداول الأساسية
@@ -233,45 +238,50 @@ $env:SUPABASE_ACCESS_TOKEN = "<management-api-token>"
 `fund_member_credit_ledger`، `fund_expense_requests`، `fund_expense_approvals`،
 `fund_cash_transfers`، `fund_attachments`، `fund_reminder_logs`،
 `fund_audit_logs`، `fund_notifications`، `fund_events`، `fund_backups`،
-`fund_device_tokens`، `fund_keepalive`، `sequences`.
+`fund_device_tokens`، `fund_keepalive`، `fund_storage`، `sequences`، و`auth.users` للمصادقة.
 
 ---
 
-## 6. نشر Edge Function
+## 6. نشر الدالة على Netlify
+
+الدالة موجودة في `api/app.ts` (كود Hono الكامل) ويغلّفها `netlify/functions/api.ts`،
+وإعداد `netlify.toml` يوجّه `/api/*` إليها.
 
 ```powershell
-$env:SUPABASE_ACCESS_TOKEN = "<management-api-token>"
-npx supabase functions deploy api `
-  --project-ref vhyckuwhuhdyvhxyqdgt `
-  --no-verify-jwt
+# نشر الواجهة والدالة معاً إلى موقع banan-fund
+npx netlify deploy --prod --site 1254f590-3ab4-4e51-8333-b2ace0534c08 `
+  --no-build --dir dist --functions netlify/functions
 ```
 
-- `--no-verify-jwt` مطلوب لأن الدالة تتحقق من الهوية بنفسها وتدعم طلبات الملفات
-  والإشعارات.
-- الدالة تقرأ `SUPABASE_DB_URL` من بيئة Supabase وتحوّله تلقائياً إلى Supavisor
-  transaction pooler.
-- الواجهة ترسل `x-region: ap-northeast-2` لتثبيت التنفيذ في سيول.
-- روابط الصور والتنزيل تستخدم `forceFunctionRegion=ap-northeast-2`.
+### متغيرات بيئة الموقع في Netlify
 
-### أسرار Edge Function في Supabase
+| المتغير | القيمة |
+|---|---|
+| `DATABASE_URL` | سلسلة اتصال Neon |
+| `AUTH_SECRET` | مفتاح توقيع الجلسات (64 hex) |
+| `CRON_SECRET` | سر نقاط `/cron/*` |
+| `APP_ORIGINS` | نطاقات الويب والتطبيق المسموح بها |
+| `VITE_API_BASE_URL` | `/api` للويب |
+| `PG_POOL_MAX` | `2` |
+| `DB_SSL` | `require` |
+
+يمكن ضبطها كلها دفعة واحدة:
 
 ```powershell
-supabase secrets set CRON_SECRET="<cron-secret>" `
-  --project-ref vhyckuwhuhdyvhxyqdgt
-
-supabase secrets set APP_ORIGINS="https://banan-fund.netlify.app,https://walid19-89.github.io,https://abdulhame709.github.io,http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,http://127.0.0.1:4173,https://localhost,capacitor://localhost" `
-  --project-ref vhyckuwhuhdyvhxyqdgt
-
-# اختياري: القيمة الافتراضية هي ap-northeast-2
-supabase secrets set BANAN_REGION="ap-northeast-2" `
-  --project-ref vhyckuwhuhdyvhxyqdgt
+node scripts/setup-preview-site.mjs banan-fund backups/neon-unclaimed-new.json
 ```
 
 ### اختبار سريع
 
 ```powershell
-curl "https://vhyckuwhuhdyvhxyqdgt.supabase.co/functions/v1/api/health" `
-  -H "x-region: ap-northeast-2"
+curl "https://banan-fund.netlify.app/api/health?db=1"
+```
+
+يجب أن يعيد `{"ok":true,"db":true,...}`. ولاختبار شامل من 11 نقطة:
+
+```powershell
+$env:API_BASE = "https://banan-fund.netlify.app/api"
+node scripts/test-api.mjs backups/neon-unclaimed-new.json
 ```
 
 ---
@@ -280,9 +290,9 @@ curl "https://vhyckuwhuhdyvhxyqdgt.supabase.co/functions/v1/api/health" `
 
 ### الرابط العام المعتمد: Netlify (يعمل بدون VPN)
 
-1. `npm run build` (مع `VITE_PUBLIC_APP_URL=https://banan-fund.netlify.app`).
-2. `node scripts/deploy-netlify.mjs` — يرفع `dist` عبر واجهة Netlify.
-3. الرابط: `https://banan-fund.netlify.app/`.
+1. `npm run build` (مع `VITE_API_BASE_URL=/api` و`VITE_PUBLIC_APP_URL=https://banan-fund.netlify.app`).
+2. `npx netlify deploy --prod --site 1254f590-3ab4-4e51-8333-b2ace0534c08 --no-build --dir dist --functions netlify/functions`.
+3. الرابط: `https://banan-fund.netlify.app/` — والـ API على نفس النطاق تحت `/api`.
 
 ### GitHub Pages (سجل تاريخي — محجوب على YemenNet)
 
@@ -296,14 +306,12 @@ curl "https://vhyckuwhuhdyvhxyqdgt.supabase.co/functions/v1/api/health" `
 
 | السر | القيمة |
 |---|---|
-| `VITE_SUPABASE_URL` | رابط المشروع |
-| `VITE_SUPABASE_ANON_KEY` | المفتاح العام anon |
-| `VITE_API_BASE_URL` | `https://<ref>.supabase.co/functions/v1/api` |
+| `VITE_API_BASE_URL` | `https://banan-fund.netlify.app/api` (مطلق للـ APK وGitHub Pages) |
+| `CRON_SECRET` | نفس سر `/cron/*` في Netlify |
 | `VITE_PUBLIC_APP_URL` | رابط الويب النهائي (يُستخدم في QR والتحقق) |
-| `VITE_EDGE_REGION` | `ap-northeast-2` |
 
-> لا تضع `service_role` في أسرار Vite. هو مطلوب فقط للـ Edge Function (مضبوط تلقائياً
-> في Supabase).
+> `VITE_SUPABASE_URL` و`VITE_SUPABASE_ANON_KEY` لم يعد لهما استخدام بعد التحويل،
+> ويمكن حذفهما من الأسرار. لا تضع سلسلة اتصال قاعدة البيانات في أي سر يبدأ بـ`VITE_`.
 
 ### ملاحظات
 
@@ -319,27 +327,27 @@ curl "https://vhyckuwhuhdyvhxyqdgt.supabase.co/functions/v1/api/health" `
 
 **<https://banan-fund.netlify.app/>**
 
-- موقع ثابت يُنشر من مجلد `dist`، والإعدادات في `netlify.toml`.
+- موقع Netlify واحد يستضيف الواجهة الثابتة (مجلد `dist`) والدالة (`netlify/functions`)، والإعدادات في `netlify.toml`.
 - `public/_redirects` يعيد كل المسارات إلى `index.html` (التطبيق يستخدم
-  `HashRouter`).
+  `HashRouter`)، و`/api/*` تُوجَّه للدالة قبل ذلك.
 - للنشر من جهازك:
 
   ```powershell
   npm run build
-  node scripts/deploy-netlify.mjs
+  npx netlify deploy --prod --site 1254f590-3ab4-4e51-8333-b2ace0534c08 `
+    --no-build --dir dist --functions netlify/functions
   ```
 
-- للنشر التلقائي: اربط المستودع من Netlify وأضف متغيرات Vite
-  (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_API_BASE_URL`,
-  `VITE_EDGE_REGION`, `VITE_PUBLIC_APP_URL`).
+- متغيرات الموقع المطلوبة: `DATABASE_URL`, `AUTH_SECRET`, `CRON_SECRET`,
+  `APP_ORIGINS`, `VITE_API_BASE_URL=/api`, `PG_POOL_MAX=2`, `DB_SSL=require`.
+- بعد أي تغيير في متغيرات البيئة يجب إعادة النشر.
 - للتحقق من وصول الشبكة: افتح
   <https://banan-fund.netlify.app/ping.txt> — يجب أن يظهر `banan-fund-ok`.
-- فحص Supabase من نفس الشبكة:
-  <https://vhyckuwhuhdyvhxyqdgt.supabase.co/functions/v1/api/health> — يجب أن
-  يظهر JSON فيه `"ok":true`.
+- فحص الخادم والقاعدة من نفس الشبكة:
+  <https://banan-fund.netlify.app/api/health?db=1> — يجب أن يظهر JSON فيه `"ok":true`.
 
-> `APP_ORIGINS` في Edge Function يجب أن يشمل `https://banan-fund.netlify.app`.
-> راجع [`docs/التشغيل-الدائم.md`](docs/التشغيل-الدائم.md) للأوامر.
+> `APP_ORIGINS` يجب أن يشمل `https://banan-fund.netlify.app` و`https://localhost`
+> (أصل تطبيق Capacitor). راجع [`docs/التشغيل-الدائم.md`](docs/التشغيل-الدائم.md) للأوامر.
 
 ### GitHub Pages (محجوب على YemenNet)
 
@@ -411,20 +419,20 @@ npm run build
 npx cap sync android
 cd android
 ./gradlew assembleRelease `
-  -PbananVersionCode=26 `
-  -PbananVersionName=1.0.26
+  -PbananVersionCode=27 `
+  -PbananVersionName=1.0.27
 ```
 
 أو اترك GitHub Actions يبني وينشر تلقائياً عند الدفع إلى `main`. يظهر الإصدار في
 **Releases** باسم `apk-1.0.<رقم التشغيل>`.
 
-> الإصدار `1.0.26` موقّع بنفس keystore السابق، لذلك يُثبّت فوق النسخة القديمة
-> دون حذف البيانات. روابط QR داخله تشير إلى `https://banan-fund.netlify.app`
-> العامل بدون VPN، ويضم الخزينة الثانية المستقلة والرصيد الدائن للعضو.
-> النسخ القديمة قد تشير إلى مشروع Supabase القديم أو إلى GitHub Pages المحجوب.
+> الإصدار `1.0.27` هو أول إصدار يعمل على Neon بالكامل، وموقّع بنفس keystore
+> السابق (SHA-256 للشهادة: `e31be2e5…f49d1f24`) لذلك يُثبّت فوق النسخة القديمة
+> دون حذف البيانات. يشير إلى `https://banan-fund.netlify.app/api`.
+> الإصدارات الأقدم تبقى تعمل على Supabase حتى تحديث التطبيق.
 >
-> - الرابط المباشر: <https://github.com/walid19-89/banan--alkher2026/releases/download/apk-1.0.26/banan-fund-1.0.26.apk>
-> - SHA-256: `c095758c536fd50bfc13b9ad79dd3fb521de7326685cebd420beb6676e59100d`
+> - الرابط المباشر: <https://github.com/walid19-89/banan--alkher2026/releases/download/apk-1.0.27/banan-fund-1.0.27.apk>
+> - SHA-256 للملف: `611cf97a98033c8b25ca46bac95a88c366603306013cd1baf286fee62b86959f`
 
 > الطباعة تعمل بشكل أفضل في نسخة الويب. تصدير CSV في APK يستخدم قائمة المشاركة
 > (Filesystem + Share).
@@ -436,10 +444,10 @@ cd android
 ### النسخ
 
 - من **الإعدادات → النسخ الاحتياطية → إنشاء نسخة الآن** (مدير النظام فقط).
-- تُحفظ النسخة في bucket خاص `fund-backups`، وتُسجّل في `fund_backups`.
+- تُحفظ النسخة داخل القاعدة في `fund_storage` (bucket منطقي `fund-backups`)، وتُسجّل في `fund_backups`.
 - يحتفظ النظام بآخر 30 نسخة ويحذف الأقدم.
-- `.github/workflows/daily-backup.yml` ينشئ نسخة تلقائية يومياً 02:23 UTC.
-- يمكن تنزيل أي نسخة من زر **تنزيل**.
+- `.github/workflows/daily-backup.yml` ينشئ نسخة تلقائية يومياً 02:23 UTC عبر `GET /cron/backup` بسر `CRON_SECRET`.
+- يمكن تنزيل أي نسخة من زر **تنزيل** (رابط موقّع HMAC صالح ساعة واحدة).
 
 محتوى الملف:
 
@@ -488,11 +496,11 @@ cd android
 
 ## 10. الأمان
 
-- RLS مفعّل على جداول الصندوق، والـ Edge Function تتحقق من JWT والصلاحية في كل مسار.
+- RLS مفعّل على جداول الصندوق داخل Neon، والدالة تتحقق من JWT والصلاحية في كل مسار.
 - صلاحيات دقيقة لكل مستخدم (عرض/إضافة/تعديل/حذف/طباعة/تصدير/استيراد) من صفحة **المستخدمون والصلاحيات**.
 - التسجيل الذاتي لا يمنح وصولاً: يُنشئ طلباً معلقاً وإشعاراً للمدير، ولا يستطيع المستخدم الدخول حتى الموافقة.
 - الاعتماد المزدوج إلزامي، ولا يوجد تجاوز للاعتماد الذاتي.
-- `service_role` يبقى داخل بيئة Supabase فقط.
+- سلسلة اتصال قاعدة البيانات وأسرار التوقيع تبقى داخل متغيرات Netlify فقط، ولا تصل للواجهة.
 - سجل التدقيق غير قابل للتعديل أو الحذف (`trg_audit_no_change`).
 - رفع الملفات يتحقق من البصمة الفعلية (magic bytes) لا من الامتداد فقط.
 - دخول الهاتف يتم في الخادم فقط: يبحث عن البريد المرتبط سراً ثم يعيد جلسة،
@@ -500,20 +508,21 @@ cd android
 - التحقق العام بـ QR يعرض بيانات السند الأساسية فقط عبر رمز عشوائي غير قابل
   للتخمين، ولا يسمح بأي تعديل.
 - طلبات الكتابة محدودة بـ 600 طلب/دقيقة/IP، وCORS مقصور على نطاقات التطبيق.
+- الجلسات: JWT HS256 موقّع بـ`AUTH_SECRET` فوق بصمات bcrypt في `auth.users`.
 - ملفات المفاتيح المحلية:
-  - `SUPABASE_KEYS.txt` (رابط المشروع، anon، service، Management API، كلمة مرور المدير تحت `ADMIN_PASSWORD`).
+  - `api/.env` (سلسلة اتصال Neon، `AUTH_SECRET`، `CRON_SECRET`).
   - `ANDROID_KEYS.txt` (كلمة مرور keystore).
-  - كلاهما في `.gitignore`.
-- لا تنشر `SUPABASE_KEYS.txt` أو `ANDROID_KEYS.txt` في أي مكان.
-- يُنصح بتدوير Management API token من لوحة Supabase بعد أي مشاركة له.
+  - كلها في `.gitignore`.
+- لا تنشر `api/.env` أو `ANDROID_KEYS.txt` في أي مكان.
+- يُنصح بتدوير كلمة مرور قاعدة البيانات من لوحة Neon دورياً ثم تحديث `api/.env` ومتغير Netlify.
 
 ---
 
 ## 11. حالة التشغيل والحسابات
 
-المشروع الجديد بدأ بقاعدة بيانات نظيفة. أي أعضاء أو حركات مالية تظهر الآن فهي من
-إدخال المستخدم بعد التشغيل، وليست بيانات تجريبية. المشروع القديم يبقى كنسخة احتياطية
-حتى يتم التأكد من المشروع الجديد بالكامل.
+انتقلت البيانات الحقيقية كاملة (35 عضوًا، 175 اشتراكًا، 38 إيصالًا، 13 حسابًا) إلى
+قاعدة Neon، وبقيت كلمات المرور كما هي لأن بصمات bcrypt نُسخت دون تغيير. مشروع
+Supabase القديم يبقى كنسخة احتياطية، والإصدارات القديمة من APK تستمر بالعمل عليه.
 
 الحساب الموجود حالياً:
 
@@ -532,37 +541,41 @@ cd android
 4. راجع **السماح بالتسجيل الذاتي** من الإعدادات: أبقِه مفتوحاً لاستقبال طلبات معلقة، أو أغلقه بعد إنشاء الحسابات.
 5. ابدأ بإضافة الأعضاء؛ الاستحقاقات الشهرية تُنشأ تلقائياً.
 
-سكربت البذر يحتاج كلمة مرور قوية:
-
-```powershell
-$env:SEED_PASSWORD = "<strong-password>"
-node scripts/seed-supabase.mjs
-```
+أنشئ الحسابات من صفحة **المستخدمون** داخل التطبيق بدل سكربتات البذر القديمة.
 
 ---
 
 ## 12. هيكل المشروع
 
 ```
+api/
+  app.ts                     واجهة REST كاملة (Hono + postgres.js)
+  server.mjs                 خادم تطوير محلي على 8787
+  .env                       أسرار محلية (غير مرفوعة)
+netlify/functions/api.ts     غلاف Netlify Function لـ /api/*
 src/
   components/      الواجهات المشتركة (Layout, MultiFileUpload, SignaturePad, PrintSheet, ...)
-  lib/             api, auth, supabase, realtime, toast, format, pdf, public
+  lib/             api, auth, session, realtime, toast, format, pdf, public
   pages/           Dashboard, Members, Subscriptions, Receipts, Expenses, Reports,
                    SecondaryBox, Users, Audit, Settings, Verify
   types.ts
 supabase/
-  functions/api/index.ts     Edge Function (Hono)
-  migrations/                0001 … 0013
+  functions/api/index.ts     Edge Function القديمة (احتياط تاريخي)
+  migrations/                0001 … 0014
 scripts/
-  seed-supabase.mjs          بذر بيانات تجريبية (اختياري للتطوير)
+  create-neon-db.mjs         إنشاء قاعدة Neon قابلة للمطالبة
+  restore-neon.mjs           استرجاع كامل + تحقق من الأعداد
+  migrate-storage.mjs        نسخ كائنات التخزين إلى fund_storage
+  apply-sql.mjs              تطبيق ملف SQL على قاعدة محددة
+  setup-preview-site.mjs     إنشاء/تحديث موقع Netlify ومتغيراته
+  test-api.mjs               اختبار شامل من 11 نقطة
   restore-backup.mjs         استعادة متقدمة للمسؤول التقني
-  backfill-hijri.mjs         تعبئة حقول التاريخ الهجري
   generate-icons.mjs         أيقونات PWA
   generate-native-assets.mjs أيقونات/شاشات Capacitor
-  deploy-netlify.mjs         نشر الويب على Netlify عبر الـ API
 android/                     مشروع Capacitor Android
 .github/workflows/           deploy-pages.yml + build-apk.yml + keep-alive.yml
                              + uptime.yml + daily-backup.yml
+docs/ترحيل-قاعدة-البيانات.md
 docs/دليل-المستخدم.md
 docs/استعادة-النسخة.md
 docs/التشغيل-الدائم.md
@@ -576,8 +589,7 @@ docs/الإنتاج.md
 - عند أول دخول كل شهر هجري جديد، ينشئ النظام استحقاقاً بقيمة الاشتراك الشهري لكل عضو نشط.
 - زر **توليد استحقاقات فترة** مخصص للفترات السابقة أو التوليد الجماعي ضمن نطاق أشهر وأعضاء محددين.
 - workflow `.github/workflows/keep-alive.yml` يعمل **كل 6 ساعات** (4 مرات يومياً):
-  - يطلب `/health?db=1` لإبقاء مشروع Supabase المجاني نشطاً.
-  - يطلب `POST /rest/v1/rpc/ping_keepalive` مباشرةً لتسجيل نبضة في القاعدة.
+  - يطلب `/health?db=1` للتأكد من عمل الدالة والقاعدة.
   - يطلب `/cron/dues` بالسر `CRON_SECRET` لإنشاء استحقاق الشهر الحالي
     وتشغيل تذكير نهاية الشهر الهجري.
 - `.github/workflows/uptime.yml` يفحص الصحة **كل 15 دقيقة**، ويفتح Issue عند
@@ -588,7 +600,7 @@ docs/الإنتاج.md
 - GitHub قد يؤخر المهام المجدولة أو يوقفها بعد خمول طويل؛ لذلك أضف مراقباً
   خارجياً (UptimeRobot أو cron-job.org) كل 5 دقائق.
 - التفاصيل الكاملة: [`docs/التشغيل-الدائم.md`](docs/التشغيل-الدائم.md).
-- الضمان الوحيد ضد إيقاف Supabase المجاني هو خطة Pro.
+- خطة Neon المجانية لا توقف المشروع عند الخمول؛ تنام الحوسبة وتستيقظ تلقائياً.
 
 ---
 
@@ -599,25 +611,24 @@ docs/الإنتاج.md
 | صفحة بيضاء بعد النشر | حدّث الصفحة بقوة (Ctrl+F5) أو ألغِ تسجيل Service Worker من إعدادات المتصفح |
 | خطأ 401 | انتهت الجلسة. سجّل الدخول من جديد |
 | خطأ 403 | دور الحساب لا يملك الصلاحية |
-| بطء أول طلب | Cold start للـ Edge Function (2–4 ثوانٍ). الطلبات التالية أسرع |
+| بطء أول طلب | Cold start لدالة Netlify (2–4 ثوانٍ). الطلبات التالية أسرع |
 | فشل رفع ملف | تحقق من الحجم والنوع، ومن تسجيل الدخول |
 | فشل بناء APK | راجع سجل GitHub Actions؛ تأكد من أسرار keystore وAndroid SDK 36 |
 | فشل نشر Pages | تأكد أن الدفع إلى `main` وأن Pages Source = GitHub Actions |
-| الموقع/التطبيق لا يفتح إلا مع VPN | `github.io` و`*.workers.dev` و`*.pages.dev` محجوبة على YemenNet، و`supabase.co` و`netlify.app` تعملان. استخدم `https://banan-fund.netlify.app/`. راجع `docs/التشغيل-الدائم.md` |
-| توقف Supabase بعد أسبوع | أضف مراقباً خارجياً كل 5 دقائق أو استخدم خطة Pro |
+| الموقع/التطبيق لا يفتح إلا مع VPN | `github.io` و`*.workers.dev` و`*.pages.dev` محجوبة على YemenNet، و`netlify.app` تعمل. استخدم `https://banan-fund.netlify.app/`. راجع `docs/التشغيل-الدائم.md` |
+| توقف الدالة عن العمل | افحص `/api/health?db=1` وسجلات Netlify Functions، وتأكد من `DATABASE_URL` و`PG_POOL_MAX=2` |
 
 ---
 
 ## 15. ملاحظات الخطة المجانية
 
-- Supabase Free: قاعدة بيانات وAuth وStorage وRealtime وEdge Functions ضمن حدود
-  الاستخدام المجاني.
-- GitHub Pages مجاني للمستودعات العامة، وNetlify مجاني للأغراض الشخصية.
+- Neon Free: 100 مشروع، 100 ساعة-حوسبة لكل مشروع شهريًا، 1 GB تخزين، 5 GB نقل.
+- Netlify Free: استضافة الواجهة والدوال ضمن الحدود المجانية.
+- GitHub Pages مجاني للمستودعات العامة (سجل تاريخي فقط).
 - GitHub Actions مجاني ضمن دقائق الحساب.
 - لا حاجة لخادم شخصي يعمل دائماً.
-- راقب حدود Supabase (حجم القاعدة، التخزين، طلبات Edge Function) من لوحة المشروع.
-- الخطة المجانية قد تُوقف المشروع بعد 7 أيام بلا نشاط؛ استخدم المراقب الخارجي
-  أو خطة Pro. راجع `docs/التشغيل-الدائم.md`.
+- راقب حدود Neon (حجم القاعدة والعمليات) من لوحة المشروع؛ الحجم الحالي نحو 10 MB.
+- خطة Neon المجانية لا توقف المشروع عند الخمول، بل تُنيم الحوسبة وتستيقظ تلقائياً.
 - إذا كان `github.io` محجوباً في شبكتك، استخدم Netlify (المعتمد) أو Vercel أو
   Firebase Hosting أو نطاقاً مخصصاً؛ لا تعتمد على VPN للتشغيل الدائم.
 
@@ -631,4 +642,4 @@ docs/الإنتاج.md
 git checkout sqlite-reference
 ```
 
-الفرع `main` مخصص الآن لنسخة السحابة (Supabase). لا تستخدم خادم Express في الإنتاج.
+الفرع `main` مخصص الآن لنسخة Neon + Netlify. لا تستخدم خادم Express في الإنتاج.
