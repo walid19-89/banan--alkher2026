@@ -6,6 +6,7 @@ dist/
 
 # local data (SQLite database, uploads, backups)
 data/
+backups/
 
 # environment / secrets
 .env
