@@ -3,7 +3,7 @@
  * environment variables. Secrets are read from api/.env and
  * backups/neon-unclaimed.json and are never printed.
  *
- * Usage: node scripts/setup-preview-site.mjs [site-name]
+ * Usage: node scripts/setup-preview-site.mjs [site-name] [db-json]
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,6 +11,7 @@ import path from 'node:path';
 
 const API = 'https://api.netlify.com/api/v1';
 const SITE_NAME = process.argv[2] || 'banan-neon-preview';
+const DB_FILE = process.argv[3] || 'backups/neon-unclaimed-new.json';
 
 function readToken() {
   if (process.env.NETLIFY_AUTH_TOKEN) return process.env.NETLIFY_AUTH_TOKEN.trim();
@@ -70,7 +71,7 @@ function readEnvFile(file) {
 
 const local = readEnvFile('api/.env');
 const neon = JSON.parse(
-  fs.readFileSync('backups/neon-unclaimed.json', 'utf8').replace(/^\uFEFF/, '')
+  fs.readFileSync(DB_FILE, 'utf8').replace(/^\uFEFF/, '')
 );
 
 const sites = await api('GET', '/sites?per_page=100');
@@ -107,9 +108,14 @@ const env = {
 
 for (const [key, value] of Object.entries(env)) {
   if (!value) throw new Error(`missing required value for ${key}`);
-  await api('POST', `/accounts/${site.account_slug}/env?site_id=${site.id}`, [
-    { key, values: [{ value, context: 'all' }] },
-  ]);
+  const payload = { key, values: [{ value, context: 'all' }] };
+  try {
+    await api('POST', `/accounts/${site.account_slug}/env?site_id=${site.id}`, [payload]);
+  } catch (error) {
+    if (!String(error.message).includes('422')) throw error;
+    // The variable already exists; PUT replaces all of its values.
+    await api('PUT', `/accounts/${site.account_slug}/env/${key}?site_id=${site.id}`, payload);
+  }
 }
 
 console.log(`site id: ${site.id}`);

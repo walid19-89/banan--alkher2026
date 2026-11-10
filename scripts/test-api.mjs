@@ -7,13 +7,18 @@
 // random and never printed.
 import postgres from 'postgres';
 import bcrypt from 'bcryptjs';
+import fs from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 const BASE = process.env.API_BASE ?? 'http://127.0.0.1:8787/api';
 const ORIGIN = BASE.replace(/\/api$/, '');
 const email = `smoke-${randomUUID()}@example.invalid`;
 const password = randomBytes(24).toString('base64url');
-const sql = postgres(process.env.DATABASE_URL, { max: 2, ssl: 'require', prepare: false });
+const databaseUrl = process.argv[2]
+  ? JSON.parse(fs.readFileSync(process.argv[2], 'utf8').replace(/^\uFEFF/, '')).connection_string
+  : process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error('DATABASE_URL or a Neon JSON file is required');
+const sql = postgres(databaseUrl, { max: 2, ssl: 'require', prepare: false });
 
 const results = [];
 function check(name, ok, detail = '') {

@@ -9,7 +9,10 @@ import postgres from 'postgres';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const DATABASE_URL = process.env.DATABASE_URL;
+const DATABASE_URL =
+  (process.argv[2]
+    ? JSON.parse(fs.readFileSync(process.argv[2], 'utf8').replace(/^\uFEFF/, '')).connection_string
+    : null) || process.env.DATABASE_URL;
 if (!SUPABASE_URL || !KEY || !DATABASE_URL) {
   throw new Error('SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and DATABASE_URL are required');
 }

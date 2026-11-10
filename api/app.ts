@@ -1583,7 +1583,9 @@ app.get('/public/verify/:type/:token', async (c) => {
 app.get('/logo', async (c) => {
   const settings = await getSettings();
   if (!settings.logo_url) throw new HttpError(404, 'لا يوجد شعار');
-  return serveStorageObject(settings.logo_url, 'no-cache');
+  // The settings payload appends ?v=<updated_at>, so a one-hour cache is safe
+  // and avoids reading 80 KB from Postgres on every login screen.
+  return serveStorageObject(settings.logo_url, 'public, max-age=3600');
 });
 
 app.get('/files/:name', async (c) => {
