@@ -900,8 +900,18 @@ const SIGNATURE_LABEL_DEFAULTS: Record<string, string[]> = {
 
 /** Returns the stored labels merged over the built-in defaults. */
 function labelsWithDefaults(value: unknown) {
-  const stored = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+  // jsonb normally arrives as an object, but older/double-encoded rows may hold
+  // the JSON text itself, so accept a string as well instead of losing labels.
+  let source = value;
+  if (typeof source === 'string') {
+    try {
+      source = JSON.parse(source);
+    } catch {
+      source = null;
+    }
+  }
+  const stored = source && typeof source === 'object' && !Array.isArray(source)
+    ? source as Record<string, unknown>
     : {};
   const labels: Record<string, string[]> = {};
   for (const [key, defaults] of Object.entries(SIGNATURE_LABEL_DEFAULTS)) {
@@ -4783,7 +4793,7 @@ app.patch('/settings', async (c) => {
       auto_dues_enabled = ${autoDues}, cash_alert_threshold = ${cashAlertThreshold},
       commitment_alert_percent = ${commitmentAlertPercent},
       approval_alert_days = ${approvalAlertDays}, reminder_day = ${reminderDay},
-      custom_labels = ${JSON.stringify(customLabels)}::jsonb,
+      custom_labels = ${tx.json(customLabels)},
       updated_at = now()
       where id = 'fund'`;
     await audit(tx, user, 'تحديث إعدادات الصندوق', 'settings', 'fund',

@@ -25,8 +25,17 @@ if (!file) {
   console.error('usage: node scripts/apply-sql.mjs <file.sql>');
   process.exit(1);
 }
+const url = readUrl();
+// Print the target host so a stale DATABASE_URL (for example an old local
+// copy) is visible before the migration runs. No credentials are printed.
+try {
+  const target = new URL(url);
+  console.log(`target: ${target.hostname}${target.pathname}`);
+} catch {
+  console.log('target: <unparseable DATABASE_URL>');
+}
 const sqlText = fs.readFileSync(file, 'utf8');
-const sql = postgres(readUrl(), { max: 1, ssl: 'require', prepare: false });
+const sql = postgres(url, { max: 1, ssl: 'require', prepare: false });
 try {
   await sql.unsafe(sqlText);
   console.log(`applied ${file}`);
