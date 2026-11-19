@@ -3,6 +3,7 @@ node_modules/
 
 # build output
 dist/
+.netlify/
 
 # local data (SQLite database, uploads, backups)
 data/

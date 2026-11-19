@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Download, Printer, QrCode, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { hijriMonthKey, hijriMonthLabel } from '../lib/hijri';
+import { signatureLabels } from '../lib/labels';
 import { downloadElementAsPdf } from '../lib/pdf';
 import { verifyDocumentUrl } from '../lib/public';
 import {
@@ -114,8 +115,8 @@ export function PrintLetterhead({ documentTitle }: { documentTitle?: string }) {
 function Signatures({ labels }: { labels: string[] }) {
   return (
     <div className="print-signatures">
-      {labels.map((label) => (
-        <div key={label} className="signature-box">
+      {labels.map((label, index) => (
+        <div key={`${label}-${index}`} className="signature-box">
           <span>{label}</span>
           <div className="signature-line" />
           <small>التوقيع والتاريخ</small>
@@ -222,6 +223,7 @@ export function ReceiptVoucher({
   onClose: () => void;
 }) {
   const { settings } = useAuth();
+  const labels = signatureLabels(settings?.custom_labels);
   const isDonation = receipt.receipt_type === 'donation';
   const isSubscription = receipt.receipt_type === 'subscription';
   const isMultiMonth = isSubscription && !receipt.subscription_id;
@@ -295,7 +297,7 @@ export function ReceiptVoucher({
           هذا السند يُعد إثباتاً رسمياً للمبلغ المذكور أعلاه، ويُحفظ ضمن السجلات المالية للصندوق.
         </div>
 
-        <Signatures labels={['المحاسب', 'أمين الصندوق', 'المستلم']} />
+        <Signatures labels={labels.receipt} />
 
         <VerificationBlock
           type="receipt"
@@ -323,6 +325,7 @@ export function PaymentVoucher({
   onClose: () => void;
 }) {
   const { settings } = useAuth();
+  const labels = signatureLabels(settings?.custom_labels);
   const approvals = expense.approvals?.filter((row) => row.decision === 'approved') ?? [];
   const slots = [approvals[0], approvals[1]];
   return (
@@ -399,7 +402,7 @@ export function PaymentVoucher({
           </div>
         </div>
 
-        <Signatures labels={['المستلم', 'أمين الصندوق', 'المدقق المالي']} />
+        <Signatures labels={labels.expense} />
 
         <VerificationBlock
           type="expense"
@@ -431,6 +434,7 @@ export function MemberStatementPrint({
   onClose: () => void;
 }) {
   const { settings } = useAuth();
+  const labels = signatureLabels(settings?.custom_labels);
   const totalPaid = subscriptions.reduce((sum, row) => sum + row.paid_amount, 0);
   const totalDue = subscriptions.reduce((sum, row) => sum + row.amount, 0);
   const arrears = totalDue - totalPaid;
@@ -561,7 +565,7 @@ export function MemberStatementPrint({
           العملة: {settings?.currency ?? 'ريال يمني'}.
         </div>
 
-        <Signatures labels={['المحاسب', 'أمين الصندوق', 'عضو الصندوق']} />
+        <Signatures labels={labels.member} />
 
         <footer className="print-footer">
           <span>صندوق بنان الخير للبنيان — الغدير – مقبنة – تعز</span>
@@ -585,6 +589,8 @@ export function ReportPrint({
   children: ReactNode;
   onClose: () => void;
 }) {
+  const { settings } = useAuth();
+  const labels = signatureLabels(settings?.custom_labels);
   return (
     <PrintPreview title={title} onClose={onClose}>
       <article className="print-sheet report-sheet">
@@ -601,7 +607,7 @@ export function ReportPrint({
           </div>
         )}
         {children}
-        <Signatures labels={['المحاسب', 'أمين الصندوق', 'رئيس مجلس الإدارة']} />
+        <Signatures labels={labels.report} />
         <footer className="print-footer">
           <span>صندوق بنان الخير للبنيان — الغدير – مقبنة – تعز</span>
           <span>تم إنشاء التقرير من النظام المحاسبي</span>

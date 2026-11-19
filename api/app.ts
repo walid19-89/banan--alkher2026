@@ -891,6 +891,66 @@ async function getSettings(db: any = sql) {
   return (await db`select * from fund_settings where id = 'fund' limit 1`)[0];
 }
 
+const SIGNATURE_LABEL_DEFAULTS: Record<string, string[]> = {
+  receipt: ['المحاسب', 'أمين الصندوق', 'المستلم'],
+  expense: ['المستلم', 'أمين الصندوق', 'المدقق المالي'],
+  member: ['المحاسب', 'أمين الصندوق', 'عضو الصندوق'],
+  report: ['المحاسب', 'أمين الصندوق', 'رئيس مجلس الإدارة'],
+};
+
+/** Returns the stored labels merged over the built-in defaults. */
+function labelsWithDefaults(value: unknown) {
+  // jsonb normally arrives as an object, but older/double-encoded rows may hold
+  // the JSON text itself, so accept a string as well instead of losing labels.
+  let source = value;
+  if (typeof source === 'string') {
+    try {
+      source = JSON.parse(source);
+    } catch {
+      source = null;
+    }
+  }
+  const stored = source && typeof source === 'object' && !Array.isArray(source)
+    ? source as Record<string, unknown>
+    : {};
+  const labels: Record<string, string[]> = {};
+  for (const [key, defaults] of Object.entries(SIGNATURE_LABEL_DEFAULTS)) {
+    const raw = Array.isArray(stored[key]) ? stored[key] as unknown[] : [];
+    labels[key] = defaults.map((fallback, index) => {
+      const candidate = typeof raw[index] === 'string' ? raw[index].trim() : '';
+      return candidate && candidate.length <= 40 && !/[<>]/.test(candidate) ? candidate : fallback;
+    });
+  }
+  return labels;
+}
+
+/** Validates a full labels payload coming from the settings form. */
+function normalizeCustomLabels(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new HttpError(400, 'مسميات التوقيعات غير صالحة');
+  }
+  const input = value as Record<string, unknown>;
+  const labels: Record<string, string[]> = {};
+  for (const [key, defaults] of Object.entries(SIGNATURE_LABEL_DEFAULTS)) {
+    if (input[key] === undefined) {
+      labels[key] = defaults;
+      continue;
+    }
+    const raw = input[key];
+    if (!Array.isArray(raw) || raw.length !== defaults.length) {
+      throw new HttpError(400, 'يجب إدخال ثلاثة مسميات توقيع لكل مستند');
+    }
+    labels[key] = raw.map((item, index) => {
+      const label = str(item, { name: `مسمى التوقيع ${index + 1}`, required: true, max: 40 }) as string;
+      if (/[<>]/.test(label)) {
+        throw new HttpError(400, 'لا يسمح باستخدام الرمزين < أو > في مسميات التوقيعات');
+      }
+      return label;
+    });
+  }
+  return labels;
+}
+
 async function publicSettings() {
   const settings = await getSettings();
   return {
@@ -906,6 +966,7 @@ async function publicSettings() {
     allow_signups: Boolean(settings.allow_signups),
     auto_dues_enabled: Boolean(settings.auto_dues_enabled),
     allow_self_approval_demo: false,
+    custom_labels: labelsWithDefaults(settings.custom_labels),
   };
 }
 
@@ -3584,9 +3645,134 @@ app.get('/reports/summary', async (c) => {
   });
 });
 
+async function annualHijriReport(hijriYear: number) {
+  // Build the twelve Hijri months as Gregorian boundaries, then bucket daily
+  // rows by their Umm al-Qura month. Hijri months straddle Gregorian ones, so
+  // grouping by the Gregorian month key would produce misleading labels.
+  const monthStarts: string[] = [];
+  const monthEnds: string[] = [];
+  for (let month = 1; month <= 12; month += 1) {
+    const start = fromHijri(hijriYear, month, 1);
+    const next = month === 12 ? fromHijri(hijriYear + 1, 1, 1) : fromHijri(hijriYear, month + 1, 1);
+    if (!start || !next) throw new HttpError(500, 'تعذر حساب بداية الشهر الهجري');
+    monthStarts.push(start);
+    monthEnds.push(next);
+  }
+  const yearStart = monthStarts[0];
+  const yearEnd = monthEnds[11];
+  const previousStart = fromHijri(hijriYear - 1, 1, 1);
+  if (!previousStart) throw new HttpError(500, 'تعذر حساب السنة الهجرية السابقة');
+
+  const receiptRows = await sql`select receipt_date::text as day, amount from fund_receipts
+    where receipt_date >= ${yearStart} and receipt_date < ${yearEnd}`;
+  const expenseRows = await sql`select ((disbursed_at at time zone 'Asia/Aden')::date)::text as day, amount
+    from fund_expense_requests
+    where status = 'paid'
+      and (disbursed_at at time zone 'Asia/Aden')::date >= ${yearStart}
+      and (disbursed_at at time zone 'Asia/Aden')::date < ${yearEnd}`;
+
+  const receiptsByMonth = new Array(12).fill(0) as number[];
+  const expensesByMonth = new Array(12).fill(0) as number[];
+  const bucket = (rows: any[], target: number[]) => {
+    for (const row of rows) {
+      const hijri = toHijri(String(row.day));
+      if (hijri.year === hijriYear && hijri.month >= 1 && hijri.month <= 12) {
+        target[hijri.month - 1] += Number(row.amount) || 0;
+      }
+    }
+  };
+  bucket(receiptRows as any[], receiptsByMonth);
+  bucket(expenseRows as any[], expensesByMonth);
+
+  const previous = (await sql`select
+      coalesce((select sum(amount) from fund_receipts
+        where receipt_date >= ${previousStart} and receipt_date < ${yearStart}), 0) as receipts,
+      coalesce((select sum(amount) from fund_expense_requests
+        where status = 'paid'
+          and (disbursed_at at time zone 'Asia/Aden')::date >= ${previousStart}
+          and (disbursed_at at time zone 'Asia/Aden')::date < ${yearStart}), 0) as expenses`)[0];
+
+  const memberRows = await sql`select joined_on::text as day from fund_members
+    where joined_on >= ${yearStart} and joined_on < ${yearEnd}`;
+  const membersByMonth = new Array(12).fill(0) as number[];
+  for (const row of memberRows as any[]) {
+    const hijri = toHijri(String(row.day));
+    if (hijri.year === hijriYear && hijri.month >= 1 && hijri.month <= 12) {
+      membersByMonth[hijri.month - 1] += 1;
+    }
+  }
+
+  const dues = (await sql`select coalesce(sum(amount), 0) as accrued,
+      coalesce(sum(paid_amount), 0) as collected
+    from fund_subscriptions
+    where hijri_year = ${hijriYear}
+       or (hijri_year is null and due_month >= ${yearStart} and due_month < ${yearEnd})`)[0];
+  const memberTotals = (await sql`select count(*) as total,
+      coalesce(sum(case when active then 1 else 0 end), 0) as active
+    from fund_members`)[0];
+  const collectionRate = Number(dues.accrued) > 0
+    ? round2((Number(dues.collected) / Number(dues.accrued)) * 100)
+    : 0;
+
+  const months = receiptsByMonth.map((value, index) => ({
+    month: hijriMonthKey(hijriYear, index + 1),
+    hijri_year: hijriYear,
+    hijri_month: index + 1,
+    label: `${HIJRI_MONTHS[index]} ${hijriYear} هـ`,
+    receipts: round2(value),
+    expenses: round2(expensesByMonth[index]),
+    net: round2(value - expensesByMonth[index]),
+  }));
+  const receipts = round2(receiptsByMonth.reduce((sum, value) => sum + value, 0));
+  const expenses = round2(expensesByMonth.reduce((sum, value) => sum + value, 0));
+  const previousReceipts = round2(previous.receipts);
+  const previousExpenses = round2(previous.expenses);
+  const growth = (currentValue: number, previousValue: number) =>
+    previousValue > 0 ? round2(((currentValue - previousValue) / previousValue) * 100) : null;
+
+  return {
+    calendar: 'hijri',
+    hijri_year: hijriYear,
+    year: hijriYear,
+    year_label: `${hijriYear} هـ`,
+    months,
+    totals: {
+      receipts,
+      expenses,
+      net: round2(receipts - expenses),
+      collection_rate: collectionRate,
+      active_members: Number(memberTotals.active ?? 0),
+      total_members: Number(memberTotals.total ?? 0),
+      new_members: membersByMonth.reduce((sum, value) => sum + value, 0),
+    },
+    previous: {
+      receipts: previousReceipts,
+      expenses: previousExpenses,
+      net: round2(previousReceipts - previousExpenses),
+    },
+    growth: {
+      receipts: growth(receipts, previousReceipts),
+      expenses: growth(expenses, previousExpenses),
+      net: growth(receipts - expenses, previousReceipts - previousExpenses),
+    },
+    member_growth: membersByMonth.map((count, index) => ({
+      month: hijriMonthKey(hijriYear, index + 1),
+      hijri_month: index + 1,
+      count,
+    })),
+  };
+}
+
 app.get('/reports/annual', async (c) => {
   const user = await requireUser(c);
   requireCap(user, 'reports.view');
+  // The Hijri calendar is opt-in through `hijri_year` so older installed APKs,
+  // which still send the Gregorian `year` parameter, keep their old response.
+  const hijriYearParam = c.req.query('hijri_year');
+  if (hijriYearParam) {
+    const hijriYear = intRange(hijriYearParam, 1400, 1500, { name: 'السنة الهجرية' });
+    return c.json(await annualHijriReport(hijriYear));
+  }
   const currentYear = Number(todayISO().slice(0, 4));
   const year = intRange(c.req.query('year') ?? currentYear, 2000, 2100, { name: 'السنة' });
   const start = `${year}-01-01`;
@@ -4236,6 +4422,7 @@ app.get('/reports/export', async (c) => {
 function protocolSettings(settings: any) {
   return {
     ...settings,
+    custom_labels: labelsWithDefaults(settings.custom_labels),
     logo_file: settings.logo_url,
     logo_url: settings.logo_url
       ? `/api/logo?v=${encodeURIComponent(settings.updated_at)}`
@@ -4580,6 +4767,9 @@ app.patch('/settings', async (c) => {
   const reminderDay = body?.reminder_day === undefined
     ? Number(current.reminder_day ?? 25)
     : intRange(body.reminder_day, 1, 31, { name: 'يوم تذكير نهاية الشهر' });
+  const customLabels = body?.custom_labels === undefined
+    ? labelsWithDefaults(current.custom_labels)
+    : normalizeCustomLabels(body.custom_labels);
 
   let logoFile = current.logo_url;
   if (body?.logo_file === null || body?.logo_file === '') {
@@ -4603,10 +4793,11 @@ app.patch('/settings', async (c) => {
       auto_dues_enabled = ${autoDues}, cash_alert_threshold = ${cashAlertThreshold},
       commitment_alert_percent = ${commitmentAlertPercent},
       approval_alert_days = ${approvalAlertDays}, reminder_day = ${reminderDay},
+      custom_labels = ${tx.json(customLabels)},
       updated_at = now()
       where id = 'fund'`;
     await audit(tx, user, 'تحديث إعدادات الصندوق', 'settings', 'fund',
-      `الاسم: ${fundName} — الاشتراك: ${defaultFee} — الرصيد الافتتاحي: ${openingBalance} — الاستحقاقات التلقائية: ${autoDues ? 'مفعلة' : 'معطلة'} — العملة الثانية: ${secondaryEnabled ? `${secondaryCurrency} (1 = ${exchangeRate})` : 'معطلة'} — الخزينة الثانية: ${secondaryBoxEnabled ? `مفعلة (رصيد افتتاحي ${secondaryOpeningBalance})` : 'معطلة'} — تنبيهات: نقدي ${cashAlertThreshold}، التزامات ${commitmentAlertPercent}%، اعتماد ${approvalAlertDays} أيام، تذكير يوم ${reminderDay}`);
+      `الاسم: ${fundName} — الاشتراك: ${defaultFee} — الرصيد الافتتاحي: ${openingBalance} — الاستحقاقات التلقائية: ${autoDues ? 'مفعلة' : 'معطلة'} — العملة الثانية: ${secondaryEnabled ? `${secondaryCurrency} (1 = ${exchangeRate})` : 'معطلة'} — الخزينة الثانية: ${secondaryBoxEnabled ? `مفعلة (رصيد افتتاحي ${secondaryOpeningBalance})` : 'معطلة'} — تنبيهات: نقدي ${cashAlertThreshold}، التزامات ${commitmentAlertPercent}%، اعتماد ${approvalAlertDays} أيام، تذكير يوم ${reminderDay} — مسميات التوقيعات: ${Object.values(customLabels).map((group) => group.join(' / ')).join(' | ')}`);
   });
 
   return c.json({ settings: protocolSettings(await getSettings()) });
