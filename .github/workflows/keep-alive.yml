@@ -22,14 +22,18 @@ jobs:
           curl --fail --silent --show-error --retry 3 --retry-delay 5 "$API_BASE/health?db=1"
           echo "Database is awake."
 
-      - name: Touch database through REST RPC
+      # Legacy only: keeps the retired Supabase project awake for APK builds
+      # older than 1.0.27. It must never block the dues/reminder step below, so
+      # a missing secret or a retired project only produces a warning.
+      - name: Touch legacy Supabase project (optional)
+        continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: |
           if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
-            echo "Supabase URL or anon key secret is missing"
-            exit 1
+            echo "Legacy Supabase secrets are not configured; skipping."
+            exit 0
           fi
           curl --fail --silent --show-error --retry 3 --retry-delay 5 \
             -X POST "$SUPABASE_URL/rest/v1/rpc/ping_keepalive" \

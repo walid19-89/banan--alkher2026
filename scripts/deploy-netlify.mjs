@@ -1,22 +1,42 @@
 /**
  * Deploy the built SPA in ./dist to Netlify using the REST API.
  *
+ * WARNING: this uploads static files only and leaves the Netlify Function
+ * (`/api/*`) on its previous build, which produces a UI/API mismatch. Prefer the
+ * official CLI, which deploys both:
+ *
+ *   netlify deploy --site <site-id> --build
+ *   netlify deploy --site <site-id> --build --prod
+ *
  * Uses the token that `netlify login` stores locally, so no secret is ever
  * printed. Files are uploaded individually with SHA-1 digests instead of a zip,
  * because Windows zip writers store backslash separators that Netlify would
  * treat as literal file names.
  *
  * Usage:
- *   node scripts/deploy-netlify.mjs [site-name]
+ *   node scripts/deploy-netlify.mjs --allow-static-only [site-name]
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+if (!process.argv.includes('--allow-static-only')) {
+  console.error(
+    [
+      'Refusing to upload static files only: the API function would stay on an older build.',
+      'Use the Netlify CLI so the UI and /api are deployed together:',
+      '  netlify deploy --site 1254f590-3ab4-4e51-8333-b2ace0534c08 --build',
+      '  netlify deploy --site 1254f590-3ab4-4e51-8333-b2ace0534c08 --build --prod',
+      'If you really need a static-only upload, add --allow-static-only.',
+    ].join('\n')
+  );
+  process.exit(1);
+}
+
 const API = 'https://api.netlify.com/api/v1';
 const DIST = path.resolve('dist');
-const SITE_NAME = process.argv[2] || 'banan-fund';
+const SITE_NAME = process.argv.slice(2).find((arg) => !arg.startsWith('--')) || 'banan-fund';
 
 function readToken() {
   if (process.env.NETLIFY_AUTH_TOKEN) return process.env.NETLIFY_AUTH_TOKEN.trim();

@@ -57,8 +57,6 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
           # QR verification links must point at the permanent no-VPN host.
           VITE_PUBLIC_APP_URL: https://banan-fund.pool-wave.workers.dev

@@ -24,7 +24,7 @@ Excel، المرفقات المتعددة، التوقيع الإلكتروني 
 | تطبيق الأندرويد (APK) | https://github.com/walid19-89/banan--alkher2026/releases |
 | الكود | https://github.com/walid19-89/banan--alkher2026 |
 | قاعدة البيانات (Neon) | https://console.neon.tech/ |
-| Supabase (احتياط تاريخي) | https://supabase.com/dashboard/project/vhyckuwhuhdyvhxyqdgt |
+| Supabase (مؤرشف — غير مستخدم في الإنتاج) | مشروع قديم يبقى للتطبيقات المثبّتة قبل 1.0.27 فقط |
 
 > دليل الاستخدام خطوة بخطوة: [`docs/دليل-المستخدم.md`](docs/دليل-المستخدم.md)
 >
@@ -423,8 +423,10 @@ cd android
   -PbananVersionName=1.0.27
 ```
 
-أو اترك GitHub Actions يبني وينشر تلقائياً عند الدفع إلى `main`. يظهر الإصدار في
-**Releases** باسم `apk-1.0.<رقم التشغيل>`.
+أو شغّل workflow **Build Android APK** يدوياً من تبويب Actions في GitHub. البناء
+التلقائي عند الدفع إلى `main` **مُعطَّل عمداً** حتى لا يُنشأ إصدار APK جديد أو
+Release غير مقصود عند تحديث الموقع. يظهر الإصدار في **Releases** باسم
+`apk-1.0.<رقم التشغيل>`.
 
 > الإصدار `1.0.27` هو أول إصدار يعمل على Neon بالكامل، وموقّع بنفس keystore
 > السابق (SHA-256 للشهادة: `e31be2e5…f49d1f24`) لذلك يُثبّت فوق النسخة القديمة
@@ -520,9 +522,12 @@ cd android
 
 ## 11. حالة التشغيل والحسابات
 
-انتقلت البيانات الحقيقية كاملة (35 عضوًا، 175 اشتراكًا، 38 إيصالًا، 13 حسابًا) إلى
-قاعدة Neon، وبقيت كلمات المرور كما هي لأن بصمات bcrypt نُسخت دون تغيير. مشروع
-Supabase القديم يبقى كنسخة احتياطية، والإصدارات القديمة من APK تستمر بالعمل عليه.
+انتقلت البيانات الحقيقية كاملة إلى قاعدة Neon (39 عضوًا، 234 اشتراكًا، 48 إيصالًا)،
+وبقيت كلمات المرور كما هي لأن بصمات bcrypt نُسخت دون تغيير.
+
+**حالة Supabase:** الكود الحالي وموقع Netlify لا يستخدمان Supabase إطلاقاً (لا
+متغيرات ولا اتصال). يبقى المشروع القديم قائماً فقط كي تعمل الإصدارات المثبّتة قبل
+`1.0.27`، ولن يُحذف إلا بعد التأكد من تحديث كل المستخدمين.
 
 الحسابات: حساب المدير المسؤول واحد، ويُسلَّم اسم الدخول وكلمة المروره
 **مباشرةً** من مسؤول الصندوق (أو عبر مدير كلمات المرور)، ولا يُكتبان في أي ملف
@@ -561,8 +566,8 @@ src/
                    SecondaryBox, Users, Audit, Settings, Verify
   types.ts
 supabase/
-  functions/api/index.ts     Edge Function القديمة (احتياط تاريخي)
-  migrations/                0001 … 0014
+  migrations/                ملفات SQL (0001 … 0015) — سجل المخطط فقط،
+                             تُطبَّق على Neon ولا تتصل بـSupabase
 scripts/
   create-neon-db.mjs         إنشاء قاعدة Neon قابلة للمطالبة
   restore-neon.mjs           استرجاع كامل + تحقق من الأعداد
@@ -574,8 +579,8 @@ scripts/
   generate-icons.mjs         أيقونات PWA
   generate-native-assets.mjs أيقونات/شاشات Capacitor
 android/                     مشروع Capacitor Android
-.github/workflows/           deploy-pages.yml + build-apk.yml + keep-alive.yml
-                             + uptime.yml + daily-backup.yml
+.github/workflows/           keep-alive.yml + uptime.yml + daily-backup.yml
+                             ونشر/بناء يدوي عند الحاجة فقط (workflow_dispatch)
 docs/ترحيل-قاعدة-البيانات.md
 docs/دليل-المستخدم.md
 docs/استعادة-النسخة.md
@@ -615,7 +620,7 @@ docs/الإنتاج.md
 | بطء أول طلب | Cold start لدالة Netlify (2–4 ثوانٍ). الطلبات التالية أسرع |
 | فشل رفع ملف | تحقق من الحجم والنوع، ومن تسجيل الدخول |
 | فشل بناء APK | راجع سجل GitHub Actions؛ تأكد من أسرار keystore وAndroid SDK 36 |
-| فشل نشر Pages | تأكد أن الدفع إلى `main` وأن Pages Source = GitHub Actions |
+| فشل نشر Pages | النشر يدوي الآن: شغّل workflow «Deploy web app» من تبويب Actions، وتأكد أن Pages Source = GitHub Actions |
 | الموقع/التطبيق لا يفتح إلا مع VPN | `github.io` و`*.workers.dev` و`*.pages.dev` محجوبة على YemenNet، و`netlify.app` تعمل. استخدم `https://banan-fund.netlify.app/`. راجع `docs/التشغيل-الدائم.md` |
 | توقف الدالة عن العمل | افحص `/api/health?db=1` وسجلات Netlify Functions، وتأكد من `DATABASE_URL` و`PG_POOL_MAX=2` |
 

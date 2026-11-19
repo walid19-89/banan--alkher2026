@@ -1,8 +1,8 @@
 name: Deploy web app
 
+# Manual only. Production is served by Netlify; keep this as an optional
+# mirror so a push to main cannot publish a second copy by accident.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -33,8 +33,6 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
           VITE_PUBLIC_APP_URL: https://banan-fund.netlify.app
           VITE_EDGE_REGION: ${{ secrets.VITE_EDGE_REGION }}
