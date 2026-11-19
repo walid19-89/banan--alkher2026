@@ -67,6 +67,13 @@ export interface Capabilities {
   permissions: Record<string, boolean>;
 }
 
+export interface SignatureLabels {
+  receipt: string[];
+  expense: string[];
+  member: string[];
+  report: string[];
+}
+
 export interface PublicSettings {
   fund_name: string;
   logo_url: string | null;
@@ -78,6 +85,7 @@ export interface PublicSettings {
   allow_signups: boolean;
   auto_dues_enabled: boolean;
   allow_self_approval_demo?: boolean;
+  custom_labels?: SignatureLabels;
 }
 
 export interface FundSettings extends PublicSettings {
@@ -419,7 +427,18 @@ export interface SecondaryBoxData {
 
 export interface AnnualReport {
   year: number;
-  months: Array<{ month: string; receipts: number; expenses: number; net: number }>;
+  year_label?: string;
+  calendar?: 'gregory' | 'hijri';
+  hijri_year?: number;
+  months: Array<{
+    month: string;
+    label?: string;
+    hijri_year?: number;
+    hijri_month?: number;
+    receipts: number;
+    expenses: number;
+    net: number;
+  }>;
   totals: {
     receipts: number;
     expenses: number;
@@ -431,7 +450,7 @@ export interface AnnualReport {
   };
   previous: { receipts: number; expenses: number; net: number };
   growth: { receipts: number | null; expenses: number | null; net: number | null };
-  member_growth: Array<{ month: string; count: number }>;
+  member_growth: Array<{ month: string; hijri_month?: number; count: number }>;
 }
 
 export interface ApiError {

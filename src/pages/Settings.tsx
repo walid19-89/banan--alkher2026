@@ -5,6 +5,7 @@ import {
   ImagePlus,
   Info,
   Landmark,
+  PenLine,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -15,6 +16,7 @@ import { api, apiErrorMessage, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
 import { formatDateTime, money, moneyIn, secondaryAmount } from '../lib/format';
+import { DEFAULT_SIGNATURE_LABELS, signatureLabels } from '../lib/labels';
 import {
   Alert,
   Badge,
@@ -24,13 +26,21 @@ import {
   Field,
   LoadingState,
   PageHeader,
+  Tabs,
   TextInput,
 } from '../components/ui';
 import { FileUpload } from '../components/FileUpload';
 import { AmountInput, parseAmount } from '../components/AmountInput';
 import { BackupCard } from '../components/BackupCard';
 import { Emblem } from '../components/Logo';
-import type { FundSettings } from '../types';
+import type { FundSettings, SignatureLabels } from '../types';
+
+const LABEL_TABS: Array<{ value: keyof SignatureLabels; label: string }> = [
+  { value: 'receipt', label: 'سند القبض' },
+  { value: 'expense', label: 'سند الصرف' },
+  { value: 'member', label: 'كشف العضو' },
+  { value: 'report', label: 'التقارير' },
+];
 
 export function SettingsPage() {
   const { refresh } = useAuth();
@@ -40,6 +50,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [formError, setFormError] = useState('');
+  const [labelTab, setLabelTab] = useState<keyof SignatureLabels>('receipt');
   const [form, setForm] = useState({
     fund_name: '',
     logo_file: null as string | null,
@@ -57,6 +68,7 @@ export function SettingsPage() {
     commitment_alert_percent: '80',
     approval_alert_days: '3',
     reminder_day: '25',
+    custom_labels: DEFAULT_SIGNATURE_LABELS,
   });
 
   async function load() {
@@ -82,6 +94,7 @@ export function SettingsPage() {
         commitment_alert_percent: String(payload.settings.commitment_alert_percent ?? 80),
         approval_alert_days: String(payload.settings.approval_alert_days ?? 3),
         reminder_day: String(payload.settings.reminder_day ?? 25),
+        custom_labels: signatureLabels(payload.settings.custom_labels),
       });
     } catch (loadError) {
       setError(apiErrorMessage(loadError));
@@ -121,6 +134,7 @@ export function SettingsPage() {
         commitment_alert_percent: Number(form.commitment_alert_percent) || 0,
         approval_alert_days: Number(form.approval_alert_days) || 1,
         reminder_day: Number(form.reminder_day) || 25,
+        custom_labels: form.custom_labels,
       });
       setSettings(payload.settings);
       toast.success('تم حفظ إعدادات الصندوق بنجاح');
@@ -131,6 +145,18 @@ export function SettingsPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function updateSignatureLabel(index: number, value: string) {
+    setForm((current) => ({
+      ...current,
+      custom_labels: {
+        ...current.custom_labels,
+        [labelTab]: current.custom_labels[labelTab].map((label, position) => (
+          position === index ? value : label
+        )),
+      },
+    }));
   }
 
   if (loading) return <LoadingState label="جارٍ تحميل الإعدادات…" />;
@@ -432,6 +458,51 @@ export function SettingsPage() {
             </div>
             <Alert tone="info">
               تظهر هذه التنبيهات في لوحة التحكم. التذكيرات تُنشئ روابط واتساب ورسائل SMS جاهزة، ويُسجل إرسالها في سجل التذكيرات.
+            </Alert>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="مسميات التوقيعات في المستندات"
+              subtitle="غيّر أسماء الموقّعين التي تُطبع في نهاية سندات القبض والصرف وكشوف الأعضاء والتقارير"
+              icon={<PenLine size={19} />}
+            />
+            <Tabs
+              active={labelTab}
+              onChange={setLabelTab}
+              tabs={LABEL_TABS.map((item) => ({ value: item.value, label: item.label }))}
+            />
+            <div className="form-grid three">
+              {form.custom_labels[labelTab].map((value, index) => (
+                <Field key={`${labelTab}-${index}`} label={`مسمى التوقيع ${index + 1}`} required hint="حتى 40 حرفاً">
+                  <TextInput
+                    value={value}
+                    maxLength={40}
+                    onChange={(event) => updateSignatureLabel(index, event.target.value)}
+                    required
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="label-reset-row">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setForm((current) => ({
+                  ...current,
+                  custom_labels: {
+                    ...current.custom_labels,
+                    [labelTab]: DEFAULT_SIGNATURE_LABELS[labelTab],
+                  },
+                }))}
+              >
+                استعادة المسميات الافتراضية لهذا المستند
+              </Button>
+            </div>
+            <Alert tone="info">
+              هذه المسميات تظهر في النسخة المطبوعة وملف PDF فقط، ولا تغيّر أي بيانات أو صلاحيات.
+              التغيير يُحفظ ضمن إعدادات الصندوق ويُسجل في سجل التدقيق.
             </Alert>
           </Card>
 

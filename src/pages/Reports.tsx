@@ -51,7 +51,7 @@ import {
   Textarea,
 } from '../components/ui';
 import { HijriDateInput } from '../components/HijriInputs';
-import { currentHijriYear, fromHijri } from '../lib/hijri';
+import { currentHijriYear, fromHijri, hijriYearOptions } from '../lib/hijri';
 import { ReportPrint } from '../components/PrintSheet';
 import { DualAmount } from '../components/DualAmount';
 import type { AnnualReport, CashLedger, Member } from '../types';
@@ -199,7 +199,7 @@ export function ReportsPage() {
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [memberStatement, setMemberStatement] = useState<MemberStatement | null>(null);
   const [annual, setAnnual] = useState<AnnualReport | null>(null);
-  const [annualYear, setAnnualYear] = useState(new Date().getFullYear());
+  const [annualHijriYear, setAnnualHijriYear] = useState(currentHijriYear());
   const [reminderOpen, setReminderOpen] = useState(false);
   const [reminderChannel, setReminderChannel] = useState<'whatsapp' | 'sms'>('whatsapp');
   const [reminderMessage, setReminderMessage] = useState('');
@@ -242,7 +242,7 @@ export function ReportsPage() {
                     ? api.get<MemberStatement>(`/reports/member-movements?member_id=${selectedMemberId}&${range}`)
                     : Promise.resolve(null))
                   : tab === 'annual'
-                    ? api.get<AnnualReport>(`/reports/annual?year=${annualYear}`)
+                    ? api.get<AnnualReport>(`/reports/annual?hijri_year=${annualHijriYear}`)
                     : api.get<CashLedger>(`/reports/cash-ledger?${range}`);
         const [summaryPayload, payload] = await Promise.all([summaryPromise, tabPromise]);
         if (!active) return;
@@ -263,7 +263,7 @@ export function ReportsPage() {
     return () => {
       active = false;
     };
-  }, [tab, from, to, refreshKey, realtimeVersion, selectedMemberId, annualYear]);
+  }, [tab, from, to, refreshKey, realtimeVersion, selectedMemberId, annualHijriYear]);
 
   const rangeLabel = `${formatDate(from)} — ${formatDate(to)}`;
 
@@ -556,9 +556,9 @@ export function ReportsPage() {
             </Select>
           )}
           {tab === 'annual' && (
-            <Select value={String(annualYear)} onChange={(event) => setAnnualYear(Number(event.target.value))}>
-              {Array.from({ length: 6 }, (_, index) => new Date().getFullYear() - index).map((year) => (
-                <option key={year} value={year}>{year}</option>
+            <Select value={String(annualHijriYear)} onChange={(event) => setAnnualHijriYear(Number(event.target.value))}>
+              {hijriYearOptions().slice().reverse().map((year) => (
+                <option key={year} value={year}>{year} هـ</option>
               ))}
             </Select>
           )}
@@ -573,7 +573,7 @@ export function ReportsPage() {
           {tab === 'arrears'
             ? 'جميع الفترات — حتى تاريخ اليوم'
             : tab === 'annual'
-              ? `السنة الميلادية ${annualYear}`
+              ? `السنة الهجرية ${annualHijriYear} هـ`
               : `الفترة: ${rangeLabel}`}
         </span>
       </Card>
@@ -854,7 +854,7 @@ export function ReportsPage() {
               <Card padding={false} className="table-card annual-card">
                 <div className="report-head">
                   <div>
-                    <h3>المؤشرات السنوية {annual.year}</h3>
+                    <h3>المؤشرات السنوية {annual.year_label ?? `${annual.year} هـ`}</h3>
                     <p>مقارنة الإيرادات والمصروفات والنمو مع السنة السابقة، مع حركة الأعضاء الجدد.</p>
                   </div>
                   <div className="annual-growth-grid">
@@ -877,7 +877,7 @@ export function ReportsPage() {
                         const max = Math.max(1, ...annual.months.map((item) => Math.max(item.receipts, item.expenses)));
                         return (
                           <tr key={row.month}>
-                            <td>{monthLabel(row.month)}</td>
+                            <td>{row.label ?? monthLabel(row.month)}</td>
                             <td className="text-emerald">{money(row.receipts)}</td>
                             <td className="text-gold">{money(row.expenses)}</td>
                             <td className={row.net < 0 ? 'danger-text' : ''}>{money(row.net)}</td>
@@ -1116,8 +1116,8 @@ export function ReportsPage() {
 
       {printing && tab === 'annual' && annual && (
         <ReportPrint
-          title={`المؤشرات السنوية ${annual.year}`}
-          subtitle="مقارنة الإيرادات والمصروفات والنمو"
+          title={`المؤشرات السنوية ${annual.year_label ?? `${annual.year} هـ`}`}
+          subtitle={`السنة الهجرية ${annual.hijri_year ?? annual.year} هـ — مقارنة الإيرادات والمصروفات والنمو`}
           metrics={printMetrics}
           onClose={() => setPrinting(false)}
         >
@@ -1128,7 +1128,7 @@ export function ReportsPage() {
             <tbody>
               {annual.months.map((row) => (
                 <tr key={row.month}>
-                  <td>{monthLabel(row.month)}</td>
+                  <td>{row.label ?? monthLabel(row.month)}</td>
                   <td>{money(row.receipts, false)}</td>
                   <td>{money(row.expenses, false)}</td>
                   <td>{money(row.net, false)}</td>
