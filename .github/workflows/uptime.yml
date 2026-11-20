@@ -3,8 +3,8 @@ name: Uptime check
 on:
   schedule:
     # Every 15 minutes. GitHub may delay scheduled jobs, and this is not a
-    # replacement for an external monitor, but it catches outages and keeps the
-    # free Supabase database active between the six-hour keep-alive runs.
+    # replacement for an external monitor, but it catches outages early and
+    # keeps the Netlify Function warm.
     - cron: '*/15 * * * *'
   workflow_dispatch:
 
@@ -53,7 +53,7 @@ jobs:
                 '',
                 `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
                 '',
-                'Check the Edge Function logs and the Supabase project status before closing this issue.',
+                'Check the Netlify Function logs and the Neon database status before closing this issue.',
               ].join('\n'),
             });
 

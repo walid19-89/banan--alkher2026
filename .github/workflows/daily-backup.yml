@@ -53,7 +53,7 @@ jobs:
                 '',
                 `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
                 '',
-                'Check the Edge Function logs, the private backup bucket, and the service-role secret.',
+                'Check the Netlify Function logs, the private backup bucket, and the API database connection.',
               ].join('\n'),
             });
 
