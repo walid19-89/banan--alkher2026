@@ -76,6 +76,15 @@ interface ReportsSummary {
   period: { receipts: number; paid_expenses: number; net: number };
   counts: { receipts_count: number; expenses_count: number; active_members: number; total_members?: number };
   trend?: Array<{ month: string; receipts: number; expenses: number }>;
+  trend_hijri?: Array<{
+    month: string;
+    hijri_year: number;
+    hijri_month: number;
+    label: string;
+    short_label: string;
+    receipts: number;
+    expenses: number;
+  }>;
   income_breakdown?: Array<{ receipt_type: string; label: string; count: number; total: number }>;
   expense_breakdown?: Array<{ category: string; label: string; count: number; total: number }>;
   top_donors?: Array<{ donor_name: string; count: number; total: number }>;
@@ -415,6 +424,16 @@ export function ReportsPage() {
     return [];
   }, [tab, cash, arrears, donations, disbursements, memberStatement, annual]);
 
+  // Grouped by Hijri month, with a fallback to the legacy Gregorian series.
+  const trendPoints = summary?.trend_hijri?.length
+    ? summary.trend_hijri
+    : (summary?.trend ?? []).map((row) => ({
+        ...row,
+        label: monthLabel(row.month),
+        short_label: monthLabel(row.month).split(' ')[0],
+      }));
+  const trendMax = Math.max(1, ...trendPoints.map((row) => Math.max(row.receipts, row.expenses)));
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -452,23 +471,20 @@ export function ReportsPage() {
           <div className="erp-grid">
             <Card className="erp-panel erp-panel-wide">
               <div className="erp-panel-head">
-                <div><h3><BarChart3 size={17} /> حركة آخر 12 شهراً</h3><p>المقبوضات مقابل المصروفات المدفوعة</p></div>
+                <div><h3><BarChart3 size={17} /> حركة آخر 12 شهراً هجرية</h3><p>المقبوضات مقابل المصروفات المدفوعة</p></div>
                 <div className="erp-legend"><span><i className="dot-emerald" /> وارد</span><span><i className="dot-gold" /> صادر</span></div>
               </div>
               <div className="trend-chart">
-                {(summary.trend ?? []).map((point) => {
-                  const max = Math.max(1, ...(summary.trend ?? []).map((row) => Math.max(row.receipts, row.expenses)));
-                  return (
-                    <div key={point.month} className="trend-col" title={`${monthLabel(point.month)} — وارد ${money(point.receipts)} / صادر ${money(point.expenses)}`}>
-                      <div className="trend-bars">
-                        <span className="trend-bar in" style={{ height: `${Math.max(3, (point.receipts / max) * 100)}%` }} />
-                        <span className="trend-bar out" style={{ height: `${Math.max(3, (point.expenses / max) * 100)}%` }} />
-                      </div>
-                      <small>{monthLabel(point.month).split(' ')[0]}</small>
+                {trendPoints.map((point) => (
+                  <div key={point.month} className="trend-col" title={`${point.label} — وارد ${money(point.receipts)} / صادر ${money(point.expenses)}`}>
+                    <div className="trend-bars">
+                      <span className="trend-bar in" style={{ height: `${Math.max(3, (point.receipts / trendMax) * 100)}%` }} />
+                      <span className="trend-bar out" style={{ height: `${Math.max(3, (point.expenses / trendMax) * 100)}%` }} />
                     </div>
-                  );
-                })}
-                {!(summary.trend ?? []).length && <p className="muted">لا توجد بيانات كافية للرسم.</p>}
+                    <small>{point.short_label}</small>
+                  </div>
+                ))}
+                {!trendPoints.length && <p className="muted">لا توجد بيانات كافية للرسم.</p>}
               </div>
             </Card>
 

@@ -179,9 +179,19 @@ export function DashboardPage() {
     })
     .join(', ');
 
+  // The chart is grouped by Hijri month (the fund's accounting month). Fall
+  // back to the legacy Gregorian series if the API does not provide it yet.
+  const trend = dashboard.trend_hijri?.length
+    ? dashboard.trend_hijri
+    : dashboard.trend.map((row) => ({
+        ...row,
+        label: monthLabel(row.month),
+        short_label: monthLabel(row.month).split(' ')[0],
+      }));
+
   const maxTrend = Math.max(
     1,
-    ...dashboard.trend.flatMap((row) => [row.receipts, row.expenses])
+    ...trend.flatMap((row) => [row.receipts, row.expenses])
   );
 
   return (
@@ -442,7 +452,7 @@ export function DashboardPage() {
         <Card className="trend-card">
           <CardHeader
             title="حركة الإيرادات والمصروفات"
-            subtitle="آخر ستة أشهر"
+            subtitle="آخر ستة أشهر هجرية"
             icon={<TrendingUp size={19} />}
             action={
               <div className="chart-legend">
@@ -452,8 +462,12 @@ export function DashboardPage() {
             }
           />
           <div className="trend-chart">
-            {dashboard.trend.map((row) => (
-              <div key={row.month} className="trend-col">
+            {trend.map((row) => (
+              <div
+                key={row.month}
+                className="trend-col"
+                title={`${row.label} — إيرادات ${money(row.receipts)} / مصروفات ${money(row.expenses)}`}
+              >
                 <div className="trend-bars">
                   <div
                     className="trend-bar bar-in"
@@ -470,7 +484,7 @@ export function DashboardPage() {
                   <span>{formatNumber(row.receipts)}</span>
                   <span>{formatNumber(row.expenses)}</span>
                 </div>
-                <span className="trend-month">{monthLabel(row.month).split(' ')[0]}</span>
+                <span className="trend-month">{row.short_label}</span>
               </div>
             ))}
           </div>

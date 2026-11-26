@@ -333,6 +333,15 @@ export interface DashboardData {
   } | null;
   members: { total: number; active: number; new_this_month: number };
   trend: Array<{ month: string; receipts: number; expenses: number }>;
+  trend_hijri?: Array<{
+    month: string;
+    hijri_year: number;
+    hijri_month: number;
+    label: string;
+    short_label: string;
+    receipts: number;
+    expenses: number;
+  }>;
 }
 
 export interface MemberDashboard {

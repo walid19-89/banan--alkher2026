@@ -2446,7 +2446,7 @@ code {
   height: 14px;
 }
 .trend-values span { width: 24px; text-align: center; overflow: hidden; }
-.trend-month { font-size: 0.65rem; color: var(--slate-500); font-weight: 600; }
+.trend-month { font-size: 0.65rem; color: var(--slate-500); font-weight: 600; text-align: center; line-height: 1.15; }
 .collection-strip {
   margin-top: 14px;
   background: #f8fbf9;
@@ -3622,7 +3622,14 @@ code {
 .erp-legend { display: flex; gap: 9px; font-size: 0.6rem; color: var(--slate-500); }
 .erp-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .erp-panel .trend-chart { height: 145px; margin-bottom: 0; }
-.erp-panel .trend-col small { font-size: 0.55rem; color: var(--slate-400); white-space: nowrap; }
+.erp-panel .trend-col small {
+  font-size: 0.55rem;
+  color: var(--slate-400);
+  white-space: normal;
+  line-height: 1.15;
+  text-align: center;
+  word-break: keep-all;
+}
 .trend-bar.in { background: linear-gradient(180deg, var(--emerald-600), var(--emerald-800)); }
 .trend-bar.out { background: linear-gradient(180deg, var(--gold-500), var(--gold-700)); }
 .breakdown-list { display: flex; flex-direction: column; gap: 9px; }

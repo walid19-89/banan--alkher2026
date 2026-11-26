@@ -398,7 +398,9 @@ function hijriMonthKey(year: number, month: number) {
 }
 
 function currentHijriMonth() {
-  const hijri = toHijri(new Date());
+  // Use the fund's local date (Asia/Aden), not the server's UTC date: for the
+  // first three hours of a Yemeni day the UTC date is still yesterday.
+  const hijri = toHijri(todayISO());
   return { year: hijri.year, month: hijri.month, key: hijriMonthKey(hijri.year, hijri.month) };
 }
 
@@ -1904,6 +1906,69 @@ function lastMonths(count: number, anchor = todayISO()) {
   return months;
 }
 
+/**
+ * The fund accounts by Hijri month, so charts must be grouped and labelled by
+ * Hijri month too. Returns the last `count` Hijri months, oldest first.
+ */
+function lastHijriMonths(count: number, anchor = todayISO()) {
+  const current = toHijri(anchor);
+  const end = current.year * 12 + (current.month - 1);
+  const months: Array<{ year: number; month: number; key: string }> = [];
+  for (let offset = count - 1; offset >= 0; offset -= 1) {
+    const index = end - offset;
+    const year = Math.floor(index / 12);
+    const month = (index % 12) + 1;
+    months.push({ year, month, key: hijriMonthKey(year, month) });
+  }
+  return months;
+}
+
+function buildHijriTrend(
+  months: Array<{ year: number; month: number; key: string }>,
+  receiptRows: any[],
+  expenseRows: any[]
+) {
+  const receiptMap = new Map<string, number>(months.map((month) => [month.key, 0]));
+  const expenseMap = new Map<string, number>(months.map((month) => [month.key, 0]));
+  const add = (map: Map<string, number>, day: string, total: unknown) => {
+    if (!day) return;
+    const hijri = toHijri(day);
+    const key = hijriMonthKey(hijri.year, hijri.month);
+    if (!map.has(key)) return;
+    map.set(key, (map.get(key) ?? 0) + Number(total ?? 0));
+  };
+  for (const row of receiptRows) add(receiptMap, row.day, row.total);
+  for (const row of expenseRows) add(expenseMap, row.day, row.total);
+  return months.map((month) => ({
+    month: month.key,
+    hijri_year: month.year,
+    hijri_month: month.month,
+    label: `${HIJRI_MONTHS[month.month - 1] ?? ''} ${month.year} هـ`,
+    short_label: HIJRI_MONTHS[month.month - 1] ?? '',
+    receipts: round2(receiptMap.get(month.key) ?? 0),
+    expenses: round2(expenseMap.get(month.key) ?? 0),
+  }));
+}
+
+async function loadHijriTrend(db: any, months: Array<{ year: number; month: number; key: string }>) {
+  const first = months[0];
+  const start = first ? fromHijri(first.year, first.month, 1) : null;
+  if (!start) return buildHijriTrend(months, [], []);
+  const receiptRows = await db`
+    select r.receipt_date::text as day, coalesce(sum(r.amount), 0)::float8 as total
+    from fund_receipts r
+    where r.receipt_date >= ${start}::date
+    group by 1`;
+  const expenseRows = await db`
+    select (e.disbursed_at at time zone 'Asia/Aden')::date::text as day,
+           coalesce(sum(e.amount), 0)::float8 as total
+    from fund_expense_requests e
+    where e.status = 'paid'
+      and (e.disbursed_at at time zone 'Asia/Aden')::date >= ${start}::date
+    group by 1`;
+  return buildHijriTrend(months, receiptRows as any[], expenseRows as any[]);
+}
+
 app.get('/dashboard', async (c) => {
   const user = await requireUser(c);
 
@@ -2014,6 +2079,7 @@ app.get('/dashboard', async (c) => {
   const months = lastMonths(6);
   const receiptMap = new Map(receiptTrend.map((row: any) => [row.month, round2(row.total)]));
   const expenseMap = new Map(expenseTrend.map((row: any) => [row.month, round2(row.total)]));
+  const hijriTrend = await loadHijriTrend(sql, lastHijriMonths(6));
 
   return c.json({
     restricted: false,
@@ -2047,6 +2113,7 @@ app.get('/dashboard', async (c) => {
       receipts: receiptMap.get(month) ?? 0,
       expenses: expenseMap.get(month) ?? 0,
     })),
+    trend_hijri: hijriTrend,
   });
 });
 
@@ -3587,6 +3654,7 @@ app.get('/reports/summary', async (c) => {
     from generate_series(date_trunc('month', current_date) - interval '11 months',
       date_trunc('month', current_date), interval '1 month') as months(month)
     order by months.month asc`;
+  const hijriTrend = await loadHijriTrend(sql, lastHijriMonths(12));
   const incomeBreakdown = await sql`select receipt_type, count(*) as count, coalesce(sum(amount), 0) as total
     from fund_receipts where receipt_date between ${from} and ${to}
     group by receipt_type order by total desc`;
@@ -3621,6 +3689,7 @@ app.get('/reports/summary', async (c) => {
       receipts: round2(row.receipts),
       expenses: round2(row.expenses),
     })),
+    trend_hijri: hijriTrend,
     income_breakdown: incomeBreakdown.map((row: any) => ({
       ...row,
       label: RECEIPT_TYPE_LABELS[row.receipt_type] ?? row.receipt_type,
