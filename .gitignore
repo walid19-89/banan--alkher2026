@@ -47,3 +47,4 @@ supabase/.branches/
 
 # test output
 coverage/
+.netlify-token.txt
